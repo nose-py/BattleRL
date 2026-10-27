@@ -22,6 +22,7 @@ import { teamColor } from "../lib/config";
 import type {
   ActorState,
   StepSnapshot,
+  ActionSpaceEntry,
 } from "../types/simulation";
 
 type ViewMode = "teams" | "agents";
@@ -62,43 +63,56 @@ function rewardClass(value: number | null | undefined) {
 }
 
 function actionLabel(
-  actionId: number | undefined,
+  actionIndex: number | undefined,
+  actionSpace: ActionSpaceEntry[],
   catalog: Record<string, string>
 ): string {
-  if (actionId === undefined) {
-    return "—";
+  if (actionIndex === undefined) {
+    return "-";
   }
 
-  return catalog[String(actionId)] ?? `Acción #${actionId}`;
+  if (
+    !Number.isInteger(actionIndex) ||
+    actionIndex < 0 ||
+    actionIndex >= actionSpace.length
+  ) {
+    return `Unknown action index #${actionIndex}`;
+  }
+
+  const action = actionSpace[actionIndex];
+  const actionCode = action.code;
+
+  return (
+    catalog[String(actionCode)] ??
+    action.name ??
+    `Action code #${actionCode}`
+  );
 }
 
 function statusLabel(
   actor: ActorState,
   snapshot?: StepSnapshot
 ): string {
-  if (!snapshot) return "Sin ejecutar";
+  if (!snapshot) return "Not executed";
 
   if (snapshot.truncations[actor.id] === true) {
-    return "Límite de tiempo";
+    return "Time limit";
   }
 
   if (!actor.alive) {
-    return "Eliminado";
+    return "Eliminated";
   }
 
   if (snapshot.terminations[actor.id] === true) {
-    return "Episodio terminado";
+    return "Episode terminated";
   }
 
-  return "Activo";
+  return "Active";
 }
 
 /**
  * Calculates the sum of the rewards assigned
  * to the members of each team.
- *
- * Does not modify or redefine the reward
- * function of the simulator.
  */
 function aggregateTeamReward(
   rewards: Record<string, number>,
@@ -215,6 +229,7 @@ export default function RewardsPanel({
 
     action: actionLabel(
       latest?.actions[actor.id],
+      latest?.action_space ?? [],
       actionsCatalog
     ),
 

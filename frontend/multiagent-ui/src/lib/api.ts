@@ -6,6 +6,7 @@ import type {
   StepResponse,
   TrainingCreated,
   TrainingStatus,
+  ActionSpaceEntry,
 } from "../types/simulation";
 
 const BASE = (
@@ -75,6 +76,35 @@ function isObject(
   );
 }
 
+function normalizeActionSpace(
+  value: unknown
+): ActionSpaceEntry[] {
+  if (!Array.isArray(value)) {
+    throw new Error(
+      "The response does not contain a valid action_space array."
+    );
+  }
+
+  return value.map((entry, position) => {
+    if (
+      !isObject(entry) ||
+      !Number.isInteger(entry.index) ||
+      !Number.isInteger(entry.code) ||
+      typeof entry.name !== "string"
+    ) {
+      throw new Error(
+        `Invalid action_space entry at position ${position}.`
+      );
+    }
+
+    return {
+      index: entry.index as number,
+      code: entry.code as number,
+      name: entry.name,
+    };
+  });
+}
+
 function isWorldState(
   value: unknown
 ): value is WorldState {
@@ -95,24 +125,42 @@ function normalizeSessionResponse(
     throw new Error("Invalid session response.");
   }
 
-  const state = isWorldState(response.state)
+  const rawState = isWorldState(response.state)
     ? response.state
     : isWorldState(response)
       ? response
       : null;
 
-  if (!state) {
+  if (!rawState) {
     throw new Error(
       "The response does not contain a valid simulation state."
     );
   }
 
+  const actionSpaceValue =
+    rawState.action_space ??
+    response.action_space;
+
+  const actionSpace = normalizeActionSpace(
+    actionSpaceValue
+  );
+
+  const resolvedSessionId =
+    typeof response.session_id === "string"
+      ? response.session_id
+      : sessionId;
+
+  if (!resolvedSessionId) {
+    throw new Error("Missing session ID.");
+  }
+
   return {
-    session_id:
-      typeof response.session_id === "string"
-        ? response.session_id
-        : sessionId,
-    state,
+    session_id: resolvedSessionId,
+
+    state: {
+      ...rawState,
+      action_space: actionSpace,
+    },
   };
 }
 

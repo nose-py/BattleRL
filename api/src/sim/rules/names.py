@@ -6,3 +6,12 @@ RuleName = Literal[
     "goal",
     "elimination",
 ]
+
+RuleParams = {
+    "movement": {},
+    "shooting": {},
+    "goal": {
+        "end_episode": ["boolean", False]
+    },
+    "elimination": {},
+}

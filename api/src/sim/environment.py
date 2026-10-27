@@ -6,9 +6,10 @@ from pettingzoo import ParallelEnv
 
 from src.sim.config import SimulationConfig
 from src.sim.core import World
-from src.sim.rules.actions import ACTION_NAMES
 from src.sim.rules.registry import build_rules
 from src.sim.rewards.registry import build_reward
+
+from src.sim.rules.action_catalog import ActionCatalog
 
 
 class GridWorldEnv(ParallelEnv):
@@ -28,6 +29,8 @@ class GridWorldEnv(ParallelEnv):
         self.world = World(config)
 
         self.rules = build_rules(config)
+        self.action_catalog = ActionCatalog(self.rules)
+
         self.reward_engine = build_reward(config)
 
         self.possible_agents = [
@@ -55,8 +58,10 @@ class GridWorldEnv(ParallelEnv):
             for agent_id in self.possible_agents
         }
 
-        self.action_spaces = {
-            agent_id: spaces.Discrete(len(ACTION_NAMES))
+        self.action_spaces: dict[str, spaces.Discrete] = {
+            agent_id: spaces.Discrete(
+                self.action_catalog.n_actions
+            )
             for agent_id in self.possible_agents
         }
 
@@ -173,11 +178,18 @@ class GridWorldEnv(ParallelEnv):
         self.world.events = []
         self.world.step_count += 1
 
+        semantic_actions = {
+            agent_id: self.action_catalog.decode(
+                int(action)
+            )
+            for agent_id, action in actions.items()
+        }
+
         for rule in self.rules:
             if self.world.finished:
                 break
 
-            rule.apply(self.world, actions)
+            rule.apply(self.world, semantic_actions)
 
         alive = self.world.alive_actors()
 
@@ -246,7 +258,13 @@ class GridWorldEnv(ParallelEnv):
         )
 
     def state_snapshot(self):
-        return self.world.snapshot()
+        state = self.world.snapshot()
+
+        state["action_space"] = (
+            self.action_catalog.describe()
+        )
+
+        return state
 
     def render(self):
         return self.state_snapshot()

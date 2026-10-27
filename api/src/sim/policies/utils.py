@@ -25,8 +25,7 @@ def validate_table(data, n_actions):
 
     return result
 
-
-def state_key(observation) -> str:
+def state_key_array(observation) -> np.ndarray:
     view = np.asarray(
         observation["view"], dtype=np.int64
     ).ravel()
@@ -35,6 +34,8 @@ def state_key(observation) -> str:
         observation["self"], dtype=np.int64
     ).ravel()
 
-    values = np.concatenate([view, own])
+    return np.concatenate([view, own])
 
+def state_key_str(observation) -> str:
+    values = state_key_array(observation)
     return ",".join(map(str, values.tolist()))

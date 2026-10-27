@@ -1,5 +1,5 @@
 from src.sim.policies.base_policy import BasePolicy
-from src.sim.policies.utlils import validate_checkpoint
+from src.sim.policies.utils import validate_checkpoint
 
 class RandomPolicy(BasePolicy):
     """

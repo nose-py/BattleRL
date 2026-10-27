@@ -9,6 +9,8 @@ class MovementRule(BaseRule):
     """
     Rule that handles the movement of agents within the simulation.
     """
+    ACTIONS = [0, 1, 2, 3, 4]
+
     def apply(self, world: World, actions: dict[str, int]):
         occupied = {
             a.position

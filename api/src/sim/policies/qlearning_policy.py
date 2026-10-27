@@ -1,6 +1,5 @@
-from src.sim.policies.utlils import state_key, validate_checkpoint, validate_table
+from src.sim.policies.utils import state_key_str, validate_checkpoint, validate_table
 from src.sim.policies.base_policy import BasePolicy
-
 
 class QLearningPolicy(BasePolicy):
     """
@@ -8,11 +7,15 @@ class QLearningPolicy(BasePolicy):
     """
     kind = "q_learning"
 
-    def __init__(self, spec, n_actions, seed):
+    def __init__(self, spec, n_actions, seed, alpha, gamma, epsilon, epsilon_min, epsilon_decay):
         super().__init__(spec, n_actions, seed)
 
         self.q = {}
-        self.epsilon = spec.epsilon
+        self.alpha = alpha
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
 
     def values(self, key):
         return self.q.setdefault(
@@ -33,7 +36,7 @@ class QLearningPolicy(BasePolicy):
         if training and self.rng.random() < self.epsilon:
             return self.rng.randrange(self.n_actions)
 
-        key = state_key(observation)
+        key = state_key_str(observation)
         return self.best_action(self.values(key))
 
     def learn(
@@ -44,29 +47,29 @@ class QLearningPolicy(BasePolicy):
         next_observation,
         done,
     ):
-        current_key = state_key(observation)
+        current_key = state_key_str(observation)
         current_values = self.values(current_key)
 
         target = float(reward)
 
         if not done and next_observation is not None:
-            next_key = state_key(next_observation)
+            next_key = state_key_str(next_observation)
 
             target += (
-                self.spec.gamma
+                self.gamma
                 * max(self.values(next_key))
             )
 
         old_value = current_values[action]
 
         current_values[action] += (
-            self.spec.alpha * (target - old_value)
+            self.alpha * (target - old_value)
         )
 
     def end_episode(self):
         self.epsilon = max(
-            self.spec.epsilon_min,
-            self.epsilon * self.spec.epsilon_decay,
+            self.epsilon_min,
+            self.epsilon * self.epsilon_decay,
         )
 
     def save_state(self):

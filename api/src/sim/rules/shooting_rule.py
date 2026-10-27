@@ -9,6 +9,8 @@ class ShootingRule(BaseRule):
     """
     Rule that handles shooting actions of agents within the simulation.
     """
+    ACTIONS = [0, 5, 6, 7, 8]
+
     def apply(self, world: World, actions: dict[str, int]):
         occupants = {
             a.position: a

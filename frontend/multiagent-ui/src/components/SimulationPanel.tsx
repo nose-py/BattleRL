@@ -132,7 +132,7 @@ export default function SimulationPanel({
         onClick={onCreate}
       >
         <Plus size={16} />
-        {session ? "Crear otra sesión" : "Crear sesión"}
+        {session ? "Create another session" : "Create session"}
       </button>
 
       {state && (

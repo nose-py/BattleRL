@@ -8,4 +8,5 @@ RewardName = Literal[
     "first_goal",
     "team_rank",
     "constant",
+    "invalid_move",
 ]

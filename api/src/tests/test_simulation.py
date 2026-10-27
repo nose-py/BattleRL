@@ -19,12 +19,20 @@ def make_config(
                 "team": "red",
                 "position": [0, 0],
                 "policy": "q_learning",
+                "params": {
+                    "alpha": 0.15,
+                    "gamma": 0.95,
+                    "epsilon": 1.0,
+                    "epsilon_min": 0.05,
+                    "epsilon_decay": 0.995,
+                }
             },
             {
                 "id": "blue_1",
                 "team": "blue",
                 "position": [4, 4],
                 "policy": "random",
+                "params": {}
             },
         ]
 
@@ -84,18 +92,33 @@ def test_team_reward():
             "team": "red",
             "position": [0, 0],
             "policy": "q_learning",
+            "params": {
+                "alpha": 0.15,
+                "gamma": 0.95,
+                "epsilon": 1.0,
+                "epsilon_min": 0.05,
+                "epsilon_decay": 0.995,
+            }
         },
         {
             "id": "red_2",
             "team": "red",
             "position": [0, 1],
             "policy": "q_learning",
+            "params": {
+                "alpha": 0.15,
+                "gamma": 0.95,
+                "epsilon": 1.0,
+                "epsilon_min": 0.05,
+                "epsilon_decay": 0.995,
+            }
         },
         {
             "id": "blue_1",
             "team": "blue",
             "position": [1, 0],
             "policy": "random",
+            "params": {}
         },
     ]
 
@@ -117,7 +140,7 @@ def test_team_reward():
 
     obs, rewards, terminated, truncated, infos = (
         env.step({
-            "red_1": 6,
+            "red_1": 2,
             "red_2": 0,
             "blue_1": 0,
         })

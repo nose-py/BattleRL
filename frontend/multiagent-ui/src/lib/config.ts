@@ -1,6 +1,9 @@
 import type {
   AgentSpec,
   Catalog,
+  ParameterSchema,
+  ParameterType,
+  ParameterValue,
   Point,
   SimulationConfig,
   WorldState,
@@ -51,25 +54,51 @@ export function inside(
   );
 }
 
+export function createParameters(
+  schema: ParameterSchema
+): Record<string, ParameterValue> {
+  return Object.fromEntries(
+    Object.entries(schema).map(
+      ([name, definition]) => [
+        name,
+        definition[1],
+      ]
+    )
+  );
+}
+
+export function createPolicyParams(
+  policy: string,
+  catalog: Catalog
+): Record<string, ParameterValue> {
+  return createParameters(
+    catalog.policy_params[policy] ?? {}
+  );
+}
+
+export function createRuleOptions(
+  rule: string,
+  catalog: Catalog
+): Record<string, ParameterValue> {
+  return createParameters(
+    catalog.rule_params[rule] ?? {}
+  );
+}
+
 export function newAgent(
   id: string,
   team: string,
   policy: string,
-  position: Point
+  position: Point,
+  catalog: Catalog
 ): AgentSpec {
+
   return {
     id,
     team,
     position,
-
     policy,
-
-    alpha: 0.15,
-    gamma: 0.95,
-
-    epsilon: 1,
-    epsilon_min: 0.05,
-    epsilon_decay: 0.995,
+    params: createPolicyParams(policy, catalog),
   };
 }
 
@@ -128,19 +157,22 @@ export function initialConfig(
         "agent_a1",
         "Alpha",
         catalog.policies[0] ?? "",
-        [1, 1]
+        [1, 1],
+        catalog
       ),
+
       newAgent(
         "agent_b1",
         "Beta",
         catalog.policies[0] ?? "",
-        [5, 5]
+        [5, 5],
+        catalog
       ),
     ],
 
     rules: selectedRules.map((name) => ({
       name,
-      options: {},
+      options: createRuleOptions(name, catalog),
     })),
 
     rewards: reward
@@ -176,6 +208,8 @@ export function previewState(
       kills: 0,
       goals: 0,
     })),
+
+    action_space: [],
 
     events: [],
 
@@ -294,21 +328,28 @@ export function validateConfig(
       errors.push(`${a.id} occupies an obstacle.`);
     }
 
-    if (
-      !(a.alpha > 0 && a.alpha <= 1) ||
-      !(a.gamma >= 0 && a.gamma <= 1) ||
-      !(a.epsilon >= 0 && a.epsilon <= 1) ||
-      !(a.epsilon_min >= 0 && a.epsilon_min <= 1) ||
-      !(a.epsilon_decay > 0 && a.epsilon_decay <= 1)
-    ) {
-      errors.push(`Invalid hyperparameters for ${a.id}.`);
-    }
+    errors.push(
+      ...validateParameters(
+        `Agent "${a.id}"`,
+        a.params,
+        catalog.policy_params[a.policy]
+      )
+    );
   }
 
   for (const rule of config.rules) {
     if (!catalog.rules.includes(rule.name)) {
       errors.push(`Unknown rule: ${rule.name}.`);
+      continue;
     }
+
+    errors.push(
+      ...validateParameters(
+        `Rule "${rule.name}"`,
+        rule.options,
+        catalog.rule_params[rule.name]
+      )
+    );
   }
 
   for (const reward of config.rewards) {
@@ -330,6 +371,74 @@ export function validateConfig(
       )
     ) {
       errors.push(`Invalid values for ${reward.kind}.`);
+    }
+  }
+
+  return errors;
+}
+
+function matchesParameterType(
+  value: ParameterValue,
+  type: ParameterType
+): boolean {
+  switch (type) {
+    case "integer":
+      return (
+        typeof value === "number" &&
+        Number.isInteger(value)
+      );
+
+    case "float":
+      return (
+        typeof value === "number" &&
+        Number.isFinite(value)
+      );
+
+    case "string":
+      return typeof value === "string";
+
+    case "boolean":
+      return typeof value === "boolean";
+  }
+}
+
+function validateParameters(
+  owner: string,
+  values: Record<string, ParameterValue>,
+  schema: ParameterSchema | undefined
+): string[] {
+  const errors: string[] = [];
+
+  if (!schema) {
+    return [
+      `${owner}: parameter schema is missing from the catalog.`,
+    ];
+  }
+
+  for (const [name, definition] of Object.entries(schema)) {
+    const [type] = definition;
+
+    const value = values[name];
+
+    if (value === undefined || value === null) {
+      errors.push(
+        `${owner}: parameter "${name}" is missing.`
+      );
+      continue;
+    }
+
+    if (!matchesParameterType(value, type)) {
+      errors.push(
+        `${owner}: parameter "${name}" must be ${type}.`
+      );
+    }
+  }
+
+  for (const name of Object.keys(values)) {
+    if (!Object.prototype.hasOwnProperty.call(schema, name)) {
+      errors.push(
+        `${owner}: unexpected parameter "${name}".`
+      );
     }
   }
 

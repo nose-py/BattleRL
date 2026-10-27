@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 
 import {
+  createPolicyParams,
+  createRuleOptions,
   newAgent,
   teamColor,
 } from "../lib/config";
@@ -21,6 +23,8 @@ import type {
   EditTool,
   Point,
   SimulationConfig,
+  ParameterSchema,
+  ParameterValue,
 } from "../types/simulation";
 
 interface ConfigPanelProps {
@@ -211,6 +215,130 @@ function DictionaryEditor({
   );
 }
 
+interface DynamicParametersEditorProps {
+  schema: ParameterSchema;
+
+  values: Record<string, ParameterValue>;
+
+  onChange: (
+    name: string,
+    value: ParameterValue
+  ) => void;
+
+  emptyMessage?: string;
+}
+
+function DynamicParametersEditor({
+  schema,
+  values,
+  onChange,
+  emptyMessage = "No additional parameters required.",
+}: DynamicParametersEditorProps) {
+  const entries = Object.entries(schema);
+
+  if (entries.length === 0) {
+    return (
+      <div className="helper-text">
+        {emptyMessage}
+      </div>
+    );
+  }
+
+  return (
+    <div className="policy-params-editor">
+      <div className="mini-heading">
+        PARAMETERS
+      </div>
+
+      {entries.map(([name, definition]) => {
+        const [type, defaultValue] = definition;
+
+        const value = values[name];
+
+        return (
+          <label className="field" key={name}>
+            <span>
+              {name}
+
+              <small className="param-type">
+                {type}
+              </small>
+            </span>
+
+            {type === "boolean" ? (
+              <select
+                value={
+                  typeof value === "boolean"
+                    ? String(value)
+                    : ""
+                }
+                onChange={(event) => {
+                  onChange(
+                    name,
+                    event.target.value === "true"
+                  );
+                }}
+              >
+                <option value="" disabled>
+                  Select a value
+                </option>
+
+                <option value="true">
+                  True
+                </option>
+
+                <option value="false">
+                  False
+                </option>
+              </select>
+            ) : (
+              <input
+                type={
+                  type === "string"
+                    ? "text"
+                    : "number"
+                }
+                step={
+                  type === "integer"
+                    ? 1
+                    : "any"
+                }
+                value={
+                  value === undefined
+                    ? ""
+                    : String(value)
+                }
+                placeholder={String(defaultValue)}
+                onChange={(event) => {
+                  const raw = event.target.value;
+
+                  if (type === "string") {
+                    onChange(name, raw);
+                    return;
+                  }
+
+                  if (raw.trim() === "") {
+                    onChange(name, "");
+                    return;
+                  }
+
+                  const parsed = Number(raw);
+
+                  if (Number.isFinite(parsed)) {
+                    onChange(name, parsed);
+                  } else {
+                    onChange(name, raw);
+                  }
+                }}
+              />
+            )}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function ConfigPanel({
   config,
   catalog,
@@ -278,7 +406,7 @@ export default function ConfigPanel({
 
     update((draft) => {
       draft.agents.push(
-        newAgent(id, team, policy, position!)
+        newAgent(id, team, policy, position!, catalog)
       );
     });
 
@@ -296,7 +424,11 @@ export default function ConfigPanel({
     update((draft) => {
       draft.rules.push({
         name: available,
-        options: {},
+
+        options: createRuleOptions(
+          available,
+          catalog
+        ),
       });
     });
   }
@@ -319,10 +451,10 @@ export default function ConfigPanel({
     label: string;
     icon: typeof MousePointer2;
   }[] = [
-    { id: "inspect", label: "Inspeccionar", icon: MousePointer2 },
-    { id: "obstacle", label: "Obstáculo", icon: Map },
-    { id: "goal", label: "Objetivo", icon: Target },
-    { id: "agent", label: "Ubicar agente", icon: Crosshair },
+    { id: "inspect", label: "Inspect", icon: MousePointer2 },
+    { id: "obstacle", label: "Obstacle", icon: Map },
+    { id: "goal", label: "Goal", icon: Target },
+    { id: "agent", label: "Place Agent", icon: Crosshair },
   ];
 
   return (
@@ -330,7 +462,7 @@ export default function ConfigPanel({
       <div className="panel-heading">
         <div>
           <div className="eyebrow">EDITOR</div>
-          <h2>Configuración</h2>
+          <h2>Settings</h2>
         </div>
 
         <span className="panel-count">WORLD</span>
@@ -346,7 +478,7 @@ export default function ConfigPanel({
 
       <details className="config-section" open>
         <summary>
-          <span><Map size={17} /> Mundo</span>
+          <span><Map size={17} /> World</span>
           <span className="section-meta">
             {config.world.width} × {config.world.height}
           </span>
@@ -597,9 +729,20 @@ export default function ConfigPanel({
 
                   <select
                     value={agent.policy}
-                    onChange={(e) => update((d) => {
-                      d.agents[index].policy = e.target.value;
-                    })}
+                    onChange={(event) => {
+                      const policy = event.target.value;
+
+                      update((draft) => {
+                        const selected = draft.agents[index];
+
+                        selected.policy = policy;
+
+                        selected.params = createPolicyParams(
+                          policy,
+                          catalog
+                        );
+                      });
+                    }}
                   >
                     {catalog.policies.map((policy) => (
                       <option key={policy} value={policy}>
@@ -629,64 +772,18 @@ export default function ConfigPanel({
                   />
                 </div>
 
-                <div className="two-fields">
-                  <NumberField
-                    label="Alpha"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={agent.alpha}
-                    onChange={(v) => update((d) => {
-                      d.agents[index].alpha = v;
-                    })}
-                  />
-
-                  <NumberField
-                    label="Gamma"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={agent.gamma}
-                    onChange={(v) => update((d) => {
-                      d.agents[index].gamma = v;
-                    })}
-                  />
-                </div>
-
-                <NumberField
-                  label="Epsilon"
-                  min={0}
-                  max={1}
-                  step={0.001}
-                  value={agent.epsilon}
-                  onChange={(v) => update((d) => {
-                    d.agents[index].epsilon = v;
-                  })}
+                <DynamicParametersEditor
+                  schema={
+                    catalog.policy_params[agent.policy] ?? {}
+                  }
+                  values={agent.params}
+                  emptyMessage="This policy does not require additional parameters."
+                  onChange={(name, value) => {
+                    update((draft) => {
+                      draft.agents[index].params[name] = value;
+                    });
+                  }}
                 />
-
-                <div className="two-fields">
-                  <NumberField
-                    label="Minimum Epsilon"
-                    min={0}
-                    max={1}
-                    step={0.001}
-                    value={agent.epsilon_min}
-                    onChange={(v) => update((d) => {
-                      d.agents[index].epsilon_min = v;
-                    })}
-                  />
-
-                  <NumberField
-                    label="Epsilon Decay"
-                    min={0}
-                    max={1}
-                    step={0.001}
-                    value={agent.epsilon_decay}
-                    onChange={(v) => update((d) => {
-                      d.agents[index].epsilon_decay = v;
-                    })}
-                  />
-                </div>
 
                 <div className="agent-actions">
                   <button
@@ -744,10 +841,20 @@ export default function ConfigPanel({
               <div className="editor-heading">
                 <select
                   value={rule.name}
-                  onChange={(e) => update((d) => {
-                    d.rules[index].name = e.target.value;
-                    d.rules[index].options = {};
-                  })}
+                  onChange={(event) => {
+                    const name = event.target.value;
+
+                    update((draft) => {
+                      const selected = draft.rules[index];
+
+                      selected.name = name;
+
+                      selected.options = createRuleOptions(
+                        name,
+                        catalog
+                      );
+                    });
+                  }}
                 >
                   {catalog.rules.map((name) => (
                     <option key={name} value={name}>
@@ -759,21 +866,27 @@ export default function ConfigPanel({
                 <button
                   className="icon-button danger"
                   disabled={config.rules.length <= 1}
-                  onClick={() => update((d) => {
-                    d.rules.splice(index, 1);
-                  })}
+                  onClick={() => {
+                    update((draft) => {
+                      draft.rules.splice(index, 1);
+                    });
+                  }}
                 >
                   <Trash2 size={15} />
                 </button>
               </div>
 
-              <div className="mini-heading">Options</div>
-
-              <DictionaryEditor
+              <DynamicParametersEditor
+                schema={
+                  catalog.rule_params[rule.name] ?? {}
+                }
                 values={rule.options}
-                onChange={(values) => update((d) => {
-                  d.rules[index].options = values;
-                })}
+                emptyMessage="This rule does not require additional parameters."
+                onChange={(name, value) => {
+                  update((draft) => {
+                    draft.rules[index].options[name] = value;
+                  });
+                }}
               />
             </div>
           ))}
@@ -829,7 +942,7 @@ export default function ConfigPanel({
               </div>
 
               <NumberField
-                label="Peso"
+                label="Weight"
                 min={-10000}
                 max={10000}
                 step="any"

@@ -6,6 +6,7 @@ from src.sim.rewards.teamprogress_reward import TeamProgressReward
 from src.sim.rewards.firstgoal_reward import FirstGoalReward
 from src.sim.rewards.teamrank_reward import TeamRankReward
 from src.sim.rewards.constant_reward import ConstantReward
+from src.sim.rewards.invalid_move_reward import InvalidMoveReward
 
 from src.sim.rewards.utils import empty_rewards
 
@@ -17,6 +18,7 @@ REWARD_REGISTRY = {
     "first_goal": FirstGoalReward,
     "team_rank": TeamRankReward,
     "constant": ConstantReward,
+    "invalid_move": InvalidMoveReward,
 }
 
 class CompositeReward(BaseReward):
