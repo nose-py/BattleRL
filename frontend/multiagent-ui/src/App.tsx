@@ -397,7 +397,12 @@ export default function App() {
 
         rewards: { ...next.rewards },
         total_rewards: { ...next.total_rewards },
+
         actions: { ...next.actions },
+
+        action_space: next.state.action_space.map(
+          (entry) => ({ ...entry })
+        ),
 
         terminations: { ...next.terminations },
         truncations: { ...next.truncations },
@@ -821,8 +826,13 @@ export default function App() {
             <TrainingPanel
               status={training.status}
               episodes={training.episodes}
+
+              optimizations={training.optimizations}
+              optimizationStarted={training.optimizationStarted}
+
               starting={training.starting}
               streamConnected={training.streamConnected}
+
               onStart={(count) => void handleStartTraining(count)}
             />
 

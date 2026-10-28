@@ -24,11 +24,15 @@ import {
 import type {
   EpisodeEvent,
   TrainingStatus,
+  AgentOptimization
 } from "../types/simulation";
 
 interface TrainingPanelProps {
   status: TrainingStatus | null;
   episodes: EpisodeEvent[];
+
+  optimizations: Record<string, AgentOptimization>;
+  optimizationStarted: boolean;
 
   starting: boolean;
   streamConnected: boolean;
@@ -39,6 +43,10 @@ interface TrainingPanelProps {
 export default function TrainingPanel({
   status,
   episodes,
+
+  optimizations,
+  optimizationStarted,
+
   starting,
   streamConnected,
   onStart,
@@ -55,6 +63,30 @@ export default function TrainingPanel({
   const percentage = total > 0
     ? Math.min(100, Math.max(0, completed / total * 100))
     : 0;
+
+  const optimizationItems = Object.values(
+    optimizations
+  );
+
+  const optimizedAgents = optimizationItems.filter(
+    (item) => item.status === "completed"
+  ).length;
+
+  const showOptimization =
+    optimizationStarted ||
+    (
+      status !== null &&
+      total > 0 &&
+      completed >= total &&
+      !isTrainingFinished(status.status)
+    );
+
+  const displayedStatus =
+    isTrainingSuccessful(status?.status)
+      ? "Completed"
+      : optimizationStarted
+        ? "Optimizing agents"
+        : status?.status ?? "Not started";
 
   const chartData = useMemo(
     () => episodes.map((episode) => ({
@@ -115,11 +147,7 @@ export default function TrainingPanel({
         <>
           <div className="stat-line">
             <span>Status</span>
-            <strong>
-              {isTrainingSuccessful(status.status)
-                ? "Completed"
-                : status.status}
-            </strong>
+            <strong>{displayedStatus}</strong>
           </div>
 
           <div className="stat-line">
@@ -142,6 +170,111 @@ export default function TrainingPanel({
                 : "HTTP update"}
             </span>
           </div>
+
+          {showOptimization && (
+            <div className="optimization-section">
+              <div className="optimization-heading">
+                <div>
+                  <div className="mini-heading">
+                    POST-TRAINING OPTIMIZATION
+                  </div>
+
+                  <h4>Agent optimization</h4>
+                </div>
+
+                <span className="optimization-count">
+                  {optimizedAgents}/{optimizationItems.length}
+                </span>
+              </div>
+
+              <div className="optimization-list">
+                {optimizationItems.map((item) => {
+                  const done = item.status === "completed";
+
+                  const hasTotal =
+                    item.total_evaluations !== null &&
+                    item.total_evaluations > 0;
+
+                  const percentage = done
+                    ? 100
+                    : hasTotal
+                      ? Math.min(
+                          100,
+                          Math.max(
+                            0,
+                            item.evaluations /
+                              item.total_evaluations! * 100
+                          )
+                        )
+                      : 0;
+
+                  const statusLabel = done
+                    ? "Completed"
+                    : item.status === "running"
+                      ? "Optimizing"
+                      : "Pending";
+
+                  return (
+                    <div
+                      className="optimization-agent"
+                      key={item.agent_id}
+                    >
+                      <div className="optimization-agent-header">
+                        <strong>{item.agent_id}</strong>
+
+                        <span
+                          className={
+                            done
+                              ? "optimization-status completed"
+                              : "optimization-status"
+                          }
+                        >
+                          {statusLabel}
+                        </span>
+                      </div>
+
+                      <div className="progress-track">
+                        <div
+                          className={
+                            done
+                              ? "progress-fill optimization-done"
+                              : "progress-fill"
+                          }
+                          style={{
+                            width: `${percentage}%`,
+                          }}
+                        />
+                      </div>
+
+                      <div className="progress-caption">
+                        <span>
+                          {item.total_evaluations !== null
+                            ? `${item.evaluations} / ${item.total_evaluations} evaluations`
+                            : `${item.evaluations} evaluations`}
+                        </span>
+
+                        <span>
+                          {done
+                            ? "100%"
+                            : hasTotal
+                              ? `${percentage.toFixed(1)}%`
+                              : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {!isTrainingFinished(status.status) && (
+                <div className="helper-text">
+                  Training episodes are complete or optimization
+                  has started. The training remains active until
+                  the backend reports a terminal status.
+                </div>
+              )}
+            </div>
+          )}
 
           {chartData.length > 0 && (
             <div className="chart-container">

@@ -59,6 +59,15 @@ def train_worker(
                     "data": result,
                 })
 
+        runner.optimize_policies(
+            on_event=lambda event_type, data: (
+                output_queue.put({
+                    "type": event_type,
+                    "data": data,
+                })
+            )
+        )
+
         for agent_id, policy in runner.policies.items():
             checkpoint = folder / f"{agent_id}.json"
 
@@ -67,10 +76,13 @@ def train_worker(
                 encoding="utf-8",
             )
 
+            policy.save_artifacts(folder)
+
         manifest = {
             "training_id": training_id,
             "episodes": episodes,
             "config": config.model_dump(mode="json"),
+            "action_space": runner.env.action_catalog.describe(),
         }
 
         (folder / "manifest.json").write_text(
@@ -130,6 +142,9 @@ class TrainingJob:
                 self.status = "running"
                 self.completed_episodes += 1
                 self.last_episode = message["data"]
+
+            elif message["type"] == "optimization_started":
+                self.status = "optimizing"
 
             elif message["type"] == "completed":
                 self.status = "completed"
@@ -280,6 +295,22 @@ def load_trained_runner(training_id: str):
 
     runner = SimulationRunner(config)
 
+    saved_actions = manifest.get("action_space")
+    current_actions = runner.env.action_catalog.describe()
+
+    if saved_actions is None:
+        if list(runner.env.action_catalog.codes) != list(range(9)):
+            raise ValueError(
+                "Legacy checkpoint has no compatible "
+                "action-space signature"
+            )
+
+    elif saved_actions != current_actions:
+        raise ValueError(
+            "Checkpoint action space differs "
+            "from the configured rules"
+        )
+
     for agent_id, policy in runner.policies.items():
         checkpoint_path = folder / f"{agent_id}.json"
 
@@ -288,5 +319,6 @@ def load_trained_runner(training_id: str):
         )
 
         policy.load_state(state)
+        policy.load_artifacts(folder)
 
     return runner

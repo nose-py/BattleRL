@@ -1,4 +1,4 @@
-from src.sim.policies.utlils import state_key, validate_table
+from src.sim.policies.utils import state_key_str, validate_table
 from src.sim.policies.qlearning_policy import QLearningPolicy
 
 
@@ -8,8 +8,8 @@ class DoubleQLearningPolicy(QLearningPolicy):
     """
     kind = "double_q"
 
-    def __init__(self, spec, n_actions, seed):
-        super().__init__(spec, n_actions, seed)
+    def __init__(self, spec, n_actions, seed, alpha, gamma, epsilon, epsilon_min, epsilon_decay):
+        super().__init__(spec, n_actions, seed, alpha, gamma, epsilon, epsilon_min, epsilon_decay)
 
         self.q2 = {}
 
@@ -22,7 +22,7 @@ class DoubleQLearningPolicy(QLearningPolicy):
         if training and self.rng.random() < self.epsilon:
             return self.rng.randrange(self.n_actions)
 
-        key = state_key(observation)
+        key = state_key_str(observation)
 
         q1 = self.values(key)
         q2 = self.values2(key)
@@ -41,7 +41,7 @@ class DoubleQLearningPolicy(QLearningPolicy):
         next_observation,
         done,
     ):
-        key = state_key(observation)
+        key = state_key_str(observation)
 
         update_first = self.rng.random() < 0.5
 
@@ -56,19 +56,19 @@ class DoubleQLearningPolicy(QLearningPolicy):
         target = float(reward)
 
         if not done and next_observation is not None:
-            next_key = state_key(next_observation)
+            next_key = state_key_str(next_observation)
 
             best = self.best_action(
                 table_a(next_key)
             )
 
             target += (
-                self.spec.gamma
+                self.gamma
                 * table_b(next_key)[best]
             )
 
         current_values[action] += (
-            self.spec.alpha
+            self.alpha
             * (target - current_values[action])
         )
 

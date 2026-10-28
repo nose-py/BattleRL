@@ -15,10 +15,16 @@ from src.sim.jobs import (
     load_trained_runner,
     safe_training_path,
 )
+
 from src.sim.policies.registry import POLICY_REGISTRY
+from src.sim.policies.names import PolicyParams
+
 from src.sim.rewards.registry import REWARD_REGISTRY
+
 from src.sim.rules.actions import ACTION_NAMES
+
 from src.sim.rules.registry import RULE_REGISTRY
+from src.sim.rules.names import RuleParams
 
 
 app = FastAPI(
@@ -80,7 +86,9 @@ def get_session(session_id: str) -> Session:
 def catalog():
     return {
         "policies": list(POLICY_REGISTRY),
+        "policy_params": PolicyParams,
         "rules": list(RULE_REGISTRY),
+        "rule_params": RuleParams,
         "rewards": list(REWARD_REGISTRY),
         "actions": ACTION_NAMES,
     }
@@ -262,7 +270,7 @@ def delete_session(session_id: str):
         session = sessions.pop(session_id, None)
 
     if session is None:
-        raise HTTPException(404, "Sesión no encontrada")
+        raise HTTPException(404, "Session not found")
 
     session.runner.env.close()
 

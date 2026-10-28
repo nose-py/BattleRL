@@ -1,5 +1,27 @@
 export type Point = [number, number];
 
+export type ParameterType =
+  | "integer"
+  | "float"
+  | "string"
+  | "boolean";
+
+export type ParameterValue =
+  | number
+  | string
+  | boolean;
+
+export type ParameterDefinition =
+  | ["integer", number]
+  | ["float", number]
+  | ["string", string]
+  | ["boolean", boolean];
+
+export type ParameterSchema = Record<
+  string,
+  ParameterDefinition
+>;
+
 export interface AgentSpec {
   id: string;
   team: string;
@@ -7,17 +29,12 @@ export interface AgentSpec {
 
   policy: string;
 
-  alpha: number;
-  gamma: number;
-
-  epsilon: number;
-  epsilon_min: number;
-  epsilon_decay: number;
+  params: Record<string, ParameterValue>;
 }
 
 export interface RuleSpec {
   name: string;
-  options: Record<string, boolean | number | string>;
+  options: Record<string, ParameterValue>;
 }
 
 export interface RewardSpec {
@@ -64,10 +81,54 @@ export interface SimulationEvent {
   step: number;
 }
 
+export type OptimizationStatus =
+  | "pending"
+  | "running"
+  | "completed";
+
+export interface AgentOptimization {
+  agent_id: string;
+
+  status: OptimizationStatus;
+
+  evaluations: number;
+  total_evaluations: number | null;
+}
+
+export type OptimizationEvent =
+  | {
+      type: "optimization_started";
+      agent_id: string;
+    }
+  | {
+      type: "optimization_progress";
+      agent_id: string;
+      evaluations: number;
+      total_evaluations: number;
+    }
+  | {
+      type: "optimization_completed";
+      agent_id: string;
+    };
+
+
 export interface Catalog {
   policies: string[];
+
+  policy_params: Record<
+    string,
+    ParameterSchema
+  >;
+
   rules: string[];
+
+  rule_params: Record<
+    string,
+    ParameterSchema
+  >;
+
   rewards: string[];
+
   actions: Record<string, string>;
 }
 
@@ -83,6 +144,12 @@ export interface ActorState {
   goals: number;
 }
 
+export interface ActionSpaceEntry {
+  index: number;
+  code: number;
+  name: string;
+}
+
 export interface WorldState {
   step: number;
 
@@ -93,6 +160,8 @@ export interface WorldState {
   obstacles: Point[];
 
   actors: ActorState[];
+
+  action_space: ActionSpaceEntry[];
 
   events: SimulationEvent[];
 
@@ -151,6 +220,7 @@ export interface StepResponse
 
 export interface StepSnapshot extends StepMetrics {
   step: number;
+  action_space: ActionSpaceEntry[];
 }
 
 export type EditTool =
