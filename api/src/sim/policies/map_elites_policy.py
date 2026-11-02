@@ -6,6 +6,10 @@ import numpy as np
 
 from src.sim.policies.base_policy import BasePolicy
 
+from src.sim.policies.map_elites_descriptors import (
+    BehaviorTrace,
+    build_behavior_descriptor,
+)
 
 class MAPElitesPolicy(BasePolicy):
     """MAP-Elites policy using quality-diversity neuroevolution."""
@@ -17,6 +21,7 @@ class MAPElitesPolicy(BasePolicy):
         spec,
         n_actions: int,
         seed: int,
+        behavior_descriptor: str,
         iterations: int,
         evaluation_episodes: int,
         hidden_size: int,
@@ -64,6 +69,13 @@ class MAPElitesPolicy(BasePolicy):
         self.mutation_rate = float(mutation_rate)
         self.random_injection = float(random_injection)
 
+        self.behavior_descriptor_name = behavior_descriptor
+
+        self._descriptor = build_behavior_descriptor(
+            behavior_descriptor,
+            n_actions,
+        )
+
         self._np_rng = np.random.default_rng(seed)
 
         self._input_dim: int | None = None
@@ -74,21 +86,14 @@ class MAPElitesPolicy(BasePolicy):
         self._archive: dict[str, dict] = {}
         self._evaluations = 0
 
-        self._trace_sink: dict | None = None
+        self._trace_sink: BehaviorTrace | None = None
 
         self._episode_reward = 0.0
         self._training_trace = self._new_trace()
         self._new_genome_next_episode = False
 
-    def _new_trace(self) -> dict:
-        return {
-            "steps": 0,
-            "counts": np.zeros(
-                self.n_actions,
-                dtype=np.int64,
-            ),
-            "states": set(),
-        }
+    def _new_trace(self) -> BehaviorTrace:
+        return self._descriptor.new_trace()
 
     @staticmethod
     def _flatten(observation) -> np.ndarray:
@@ -234,11 +239,10 @@ class MAPElitesPolicy(BasePolicy):
         )
 
         if sink is not None:
-            sink["steps"] += 1
-            sink["counts"][action] += 1
-
-            sink["states"].add(
-                features.tobytes()
+            self._descriptor.observe(
+                sink,
+                features,
+                action,
             )
 
         return action
@@ -263,7 +267,7 @@ class MAPElitesPolicy(BasePolicy):
     def end_episode(self):
         if (
             self._genome is not None
-            and self._training_trace["steps"] > 0
+            and self._training_trace.steps > 0
         ):
             descriptor = self._behavior_descriptor(self._training_trace)
 
@@ -297,9 +301,9 @@ class MAPElitesPolicy(BasePolicy):
         super().prepare_evaluation_episode(seed)
 
         if self._trace_sink is not None:
-            self._trace_sink["steps"] = 0
-            self._trace_sink["counts"].fill(0)
-            self._trace_sink["states"].clear()
+            self._descriptor.reset(
+                self._trace_sink
+            )
 
     def copy_to(self, other):
         if (
@@ -307,6 +311,7 @@ class MAPElitesPolicy(BasePolicy):
             or other.n_actions != self.n_actions
             or other.hidden_size != self.hidden_size
             or other.bins != self.bins
+            or other.behavior_descriptor_name != self.behavior_descriptor_name
         ):
             raise ValueError(
                 "Incompatible MAP-Elites destination policy"
@@ -330,41 +335,16 @@ class MAPElitesPolicy(BasePolicy):
 
     def _behavior_descriptor(
         self,
-        sink=None,
+        sink: BehaviorTrace | None = None,
     ) -> tuple[float, float]:
 
         if sink is None:
             sink = self._trace_sink
 
-        if sink is None or sink["steps"] == 0:
+        if sink is None:
             return (0.0, 0.0)
 
-        steps = sink["steps"]
-        counts = sink["counts"]
-
-        nonzero = (
-            counts[counts > 0] / steps
-        )
-
-        entropy = 0.0
-
-        if self.n_actions > 1:
-            entropy = -float(
-                np.sum(
-                    nonzero * np.log(nonzero)
-                )
-            ) / math.log(
-                self.n_actions
-            )
-
-        diversity = (
-            len(sink["states"]) / steps
-        )
-
-        return (
-            float(np.clip(entropy, 0, 1)),
-            float(np.clip(diversity, 0, 1)),
-        )
+        return self._descriptor.describe(sink)
 
     def _cell(
         self,
@@ -551,6 +531,8 @@ class MAPElitesPolicy(BasePolicy):
                 self._archive,
                 key=lambda k: self._archive[k]["fitness"],
             ),
+            "behavior_descriptor": self.behavior_descriptor_name,
+            "behavior_axes": list(self._descriptor.axis_labels),
         }
 
     def save_state(self) -> dict:
@@ -579,7 +561,8 @@ class MAPElitesPolicy(BasePolicy):
                 }
                 for key, item in self._archive.items()
             },
-            "new_genome_next_episode": self._new_genome_next_episode
+            "new_genome_next_episode": self._new_genome_next_episode,
+            "behavior_descriptor": self.behavior_descriptor_name,
         }
 
     def load_state(self, data: dict):
@@ -591,6 +574,13 @@ class MAPElitesPolicy(BasePolicy):
         if data.get("n_actions") != self.n_actions:
             raise ValueError(
                 "Checkpoint action count mismatch"
+            )
+
+        if data.get("behavior_descriptor", "entropy_coverage") != self.behavior_descriptor_name:
+            raise ValueError(
+                "Checkpoint behavior descriptor mismatch: "
+                f"{data.get("behavior_descriptor", "entropy_coverage")!r} vs "
+                f"{self.behavior_descriptor_name!r}"
             )
 
         if (

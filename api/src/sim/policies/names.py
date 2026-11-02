@@ -24,6 +24,7 @@ PolicyParams = {
         "epsilon_decay": ["float", 0.99],
     },
     "map_elites": {
+        "behavior_descriptor": [["entropy_coverage", "entropy_switching", "coverage_change", "switching_change"], "entropy_coverage"],
         "iterations": ["integer", 400],
         "evaluation_episodes": ["integer", 3],
         "hidden_size": ["integer", 16],
