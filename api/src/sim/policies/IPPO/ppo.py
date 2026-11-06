@@ -6,10 +6,18 @@ from collections import defaultdict
 from typing import Callable
 
 class IPPO(BasePolicy):
+
+    _ippo_agent = None
+    
+    @classmethod
+    def get_ippo_agent(cls, env):
+        if cls._ippo_agent is None:
+            cls._ippo_agent = IPPOAgent(env)
+        return cls._ippo_agent
+    
     def __init__(self, spec, n_actions: int, seed: int, env):
         super().__init__(spec, n_actions, seed)
-        self.ippo = IPPOAgent(env)
-        print(env)
+        self.ippo = IPPO.get_ippo_agent(env)
 
     def act(self, observation, training: bool) -> int:
         agent_id=self.spec.id

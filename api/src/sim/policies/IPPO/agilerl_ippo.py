@@ -8,40 +8,6 @@ from agilerl.algorithms import IPPO
 
 logger = logging.getLogger(__name__)
 
-class SingletonMeta(type):
-    """
-    This is a thread-safe implementation of Singleton.
-    """
-
-    _instances = {}
-
-    _lock: Lock = Lock()
-    """
-    We now have a lock object that will be used to synchronize threads during
-    first access to the Singleton.
-    """
-
-    def __call__(cls, *args, **kwargs):
-        """
-        Possible changes to the value of the `__init__` argument do not affect
-        the returned instance.
-        """
-        # Now, imagine that the program has just been launched. Since there's no
-        # Singleton instance yet, multiple threads can simultaneously pass the
-        # previous conditional and reach this point almost at the same time. The
-        # first of them will acquire lock and will proceed further, while the
-        # rest will wait here.
-        with cls._lock:
-            # The first thread to acquire the lock, reaches this conditional,
-            # goes inside and creates the Singleton instance. Once it leaves the
-            # lock block, a thread that might have been waiting for the lock
-            # release may then enter this section. But since the Singleton field
-            # is already initialized, the thread won't create a new object.
-            if cls not in cls._instances:
-                instance = super().__call__(*args, **kwargs)
-                cls._instances[cls] = instance
-        return cls._instances[cls]
-
 class Barrier:
     def __init__(
         self, consumers: list[str],
@@ -90,8 +56,8 @@ class Barrier:
             return production
 
 
+class IPPOAgent:
 
-class IPPOAgent(metaclass=SingletonMeta):
     def __init__(self, env):
         self.env=env
         self.flat_env = FlatEnv(env)
@@ -114,7 +80,6 @@ class IPPOAgent(metaclass=SingletonMeta):
     def learn(self, from_: tuple, from_agent_id: str):
         agent_id = from_agent_id
         learn_args = from_
-        print(learn_args)
         self.learn_barrier.produce(elem_info=learn_args, elem_id=agent_id)
 
 
@@ -137,9 +102,7 @@ class IPPOAgent(metaclass=SingletonMeta):
     def act(self, agent_id: str, observation):
         observations = self.make_observations(agent_id, observation)
         infos = self.make_infos(agent_id)
-        print("getting action")
         all_actions, log_probs, entropies, values = self.agent.get_action(observations, infos)
-        print("action gotten")
         action = all_actions[agent_id][0]
         return action
 
