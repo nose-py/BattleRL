@@ -55,9 +55,7 @@ class Barrier:
             self.reset()
             return production
 
-
-class IPPOAgent:
-
+class IPPOImplementation:
     def __init__(self, env):
         self.env=env
         self.flat_env = FlatEnv(env)
@@ -84,26 +82,38 @@ class IPPOAgent:
 
 
     def make_observations(self, agent_id: str, observation):
+        other_agents_ids = set(self.agent_ids) - {agent_id}
         observations = {
             agent_id: observation,
             **{
                 other_agent_id: self.env.observation_spaces[other_agent_id].sample()
-                for other_agent_id in set(self.agent_ids) - {agent_id}
+                for other_agent_id in other_agents_ids
             }
         }
         flat_obs = self.flat_env._flatten(observations)
         return flat_obs
 
     def make_infos(self, agent_id):
+        other_agents_ids = set(self.agent_ids) - {agent_id}
+
+        def sample_action(for_agent_id: str):
+            return self.flat_env.action_space(for_agent_id).sample()
+
         infos = {
-            agent_id: None,
+            agent_id: {'env_defined_actions': None},
+            **{
+                other_agent_id: {
+                    'env_defined_actions': sample_action(for_agent_id= other_agent_id)
+                }
+                for other_agent_id in other_agents_ids
+            }
         }
 
     def act(self, agent_id: str, observation):
         observations = self.make_observations(agent_id, observation)
         infos = self.make_infos(agent_id)
-        all_actions, log_probs, entropies, values = self.agent.get_action(observations, infos)
-        action = all_actions[agent_id][0]
+        all_agents_actions, _, _, _ = self.agent.get_action(observations, infos)
+        action = all_agents_actions[agent_id][0]
         return action
 
 

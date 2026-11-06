@@ -27,25 +27,25 @@ def build_policies(config, n_actions: int, env):
         policy_class = POLICY_REGISTRY[
             spec.policy
         ]
-        if spec.policy == "ippo":
-            result[spec.id] = policy_class(
-                spec=spec,
-                n_actions=n_actions,
-                seed=config.world.seed + index + 1,
-                env=env
-            )
-        else:
-            try:
+        try:
+            if spec.policy == "ippo":
+                result[spec.id] = policy_class(
+                    spec=spec,
+                    n_actions=n_actions,
+                    seed=config.world.seed + index + 1,
+                    env=env
+                )
+            else:
                 result[spec.id] = policy_class(
                     spec=spec,
                     n_actions=n_actions,
                     seed=config.world.seed + index + 1,
                     **spec.params
                 )
-            except Exception as e:
-                raise RuntimeError(
-                    f"Error building policy for agent "
-                    f"{spec.id}: {e}"
-                ) from e
+        except Exception as e:
+            raise RuntimeError(
+                f"Error building policy for agent "
+                f"{spec.id}: {e}"
+            ) from e
 
     return result

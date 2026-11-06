@@ -1,4 +1,4 @@
-from .agilerl_ippo import IPPOAgent
+from .implementation import IPPOImplementation
 from src.sim.policies.base_policy import BasePolicy
 
 from agilerl.algorithms import IPPO
@@ -12,7 +12,7 @@ class IPPO(BasePolicy):
     @classmethod
     def get_ippo_agent(cls, env):
         if cls._ippo_agent is None:
-            cls._ippo_agent = IPPOAgent(env)
+            cls._ippo_agent = IPPOImplementation(env)
         return cls._ippo_agent
     
     def __init__(self, spec, n_actions: int, seed: int, env):
