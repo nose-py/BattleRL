@@ -4,6 +4,7 @@ PolicyName = Literal[
     "random",
     "q_learning",
     "double_q",
+    "ippo",
 ]
 
 PolicyParams = {
@@ -22,4 +23,5 @@ PolicyParams = {
         "epsilon_min": ["float", 0.01],
         "epsilon_decay": ["float", 0.99],
     },
+    "ippo": {},
 }
