@@ -8,11 +8,15 @@ from src.sim.policies.double_qlearning_policy import (
     DoubleQLearningPolicy,
 )
 
+from src.sim.policies.map_elites_policy import (
+    MAPElitesPolicy,
+)
 
 POLICY_REGISTRY = {
     "random": RandomPolicy,
     "q_learning": QLearningPolicy,
     "double_q": DoubleQLearningPolicy,
+    "map_elites": MAPElitesPolicy,
 }
 
 
