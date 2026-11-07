@@ -379,8 +379,12 @@ export function validateConfig(
 
 function matchesParameterType(
   value: ParameterValue,
-  type: ParameterType
+  type: ParameterType | ParameterValue[]
 ): boolean {
+  if (Array.isArray(type)) {
+    return type.some((option) => Object.is(option, value));
+  }
+
   switch (type) {
     case "integer":
       return (
@@ -429,7 +433,11 @@ function validateParameters(
 
     if (!matchesParameterType(value, type)) {
       errors.push(
-        `${owner}: parameter "${name}" must be ${type}.`
+        `${owner}: parameter "${name}" must be ${
+          Array.isArray(type)
+            ? `one of: ${type.join(", ")}`
+            : type
+        }.`
       );
     }
   }
