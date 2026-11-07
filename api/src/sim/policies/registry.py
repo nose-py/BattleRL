@@ -12,11 +12,16 @@ from src.sim.policies.map_elites_policy import (
     MAPElitesPolicy,
 )
 
+from src.sim.policies.vdn_policy import (
+    VDNPolicy,
+)
+
 POLICY_REGISTRY = {
     "random": RandomPolicy,
     "q_learning": QLearningPolicy,
     "double_q": DoubleQLearningPolicy,
     "map_elites": MAPElitesPolicy,
+    "vdn": VDNPolicy,
 }
 
 
@@ -40,5 +45,10 @@ def build_policies(config, n_actions: int):
                 f"Error building policy for agent "
                 f"{spec.id}: {e}"
             ) from e
+
+    for policy_class in {type(p) for p in result.values()}:
+        link = getattr(policy_class, "link_policies", None)
+        if link is not None:
+            link(result, config)
 
     return result
