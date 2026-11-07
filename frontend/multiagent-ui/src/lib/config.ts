@@ -1,8 +1,8 @@
 import type {
   AgentSpec,
   Catalog,
+  ParameterDefinition,
   ParameterSchema,
-  ParameterType,
   ParameterValue,
   Point,
   SimulationConfig,
@@ -377,10 +377,18 @@ export function validateConfig(
   return errors;
 }
 
-function matchesParameterType(
+function matchesParameterDefinition(
   value: ParameterValue,
-  type: ParameterType
+  definition: ParameterDefinition
 ): boolean {
+  const [type] = definition;
+
+  if (Array.isArray(type)) {
+    return type.some(
+      (allowed) => Object.is(allowed, value)
+    );
+  }
+
   switch (type) {
     case "integer":
       return (
@@ -416,7 +424,22 @@ function validateParameters(
   }
 
   for (const [name, definition] of Object.entries(schema)) {
-    const [type] = definition;
+    const [type, defaultValue] = definition;
+
+    if (Array.isArray(type)) {
+      if (type.length === 0) {
+        errors.push(
+          `${owner}: parameter "${name}" has no allowed values.`
+        );
+        continue;
+      }
+
+      if (!type.some((v) => Object.is(v, defaultValue))) {
+        errors.push(
+          `${owner}: default value for "${name}" is not among the allowed options.`
+        );
+      }
+    }
 
     const value = values[name];
 
@@ -427,9 +450,13 @@ function validateParameters(
       continue;
     }
 
-    if (!matchesParameterType(value, type)) {
+    if (!matchesParameterDefinition(value, definition)) {
+      const expected = Array.isArray(type)
+        ? `one of ${JSON.stringify(type)}`
+        : type;
+
       errors.push(
-        `${owner}: parameter "${name}" must be ${type}.`
+        `${owner}: parameter "${name}" must be ${expected}.`
       );
     }
   }
