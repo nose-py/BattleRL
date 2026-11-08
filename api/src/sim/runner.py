@@ -15,7 +15,7 @@ class SimulationRunner:
         self.config = config
 
         self.env = GridWorldEnv(config)
-        self.policies = build_policies(config, n_actions=self.env.action_catalog.n_actions)
+        self.policies = build_policies(config, n_actions=self.env.action_catalog.n_actions,env=self.env)
 
         self.observations = {}
         self.total_rewards = {}
