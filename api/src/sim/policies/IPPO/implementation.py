@@ -1,7 +1,9 @@
 from .flatten import FlatEnv
 
 import logging
+import numpy as np
 
+from dataclasses import dataclass
 from threading import Lock, Thread
 from agilerl.vector.pz_async_vec_env import AsyncPettingZooVecEnv
 from agilerl.algorithms import IPPO
@@ -40,7 +42,7 @@ class Barrier:
         return all([self.has_consumed(elem_id) for elem_id in self.elem_ids])
 
     def aggregate(self, elem_id, elem_info):
-        self._aggregate(self.aggregation, elem_id, elem_info)
+        self.aggregation = self._aggregate(self.aggregation, elem_id, elem_info)
 
     def reset(self):
         self.reset_consumed_lut()
@@ -50,19 +52,60 @@ class Barrier:
         if self.has_consumed(elem_id):
             raise ValueError(f"Consumer {elem_id} tried to consume twice, when other consumers have not consumed yet")
         self.aggregate(elem_id, elem_info)
+        self.set_consumed(elem_id)
         if self.all_consumed():
             production = self._produce(self.aggregation)
             self.reset()
             return production
 
+
+
+@dataclass(frozen=True)
+class Experience:
+    state: any #Receive as arg
+    action: any #Get from get_action
+    log_prob: any #Get from get_action
+    reward: any #Receive as arg
+    done: bool #Buffer
+    value: any #Get from get_action
+    next_ob: any #Receive as arg
+    next_done: bool #Receive as arg
+
+    def as_experience_tuple(self) -> tuple:
+        unsqueezed_tup = (
+            self.state, 
+            self.action, 
+            self.log_prob, 
+            self.reward, 
+            self.done, 
+            self.value, 
+            self.next_ob, 
+            self.next_done, 
+        )
+        print(unsqueezed_tup)
+        squeezed_tup = tuple(
+            np.array([[e]])
+            for e in unsqueezed_tup
+        )
+        return squeezed_tup
+
+@dataclass(frozen=True)
+class Action:
+    action: int
+    log_prob: float
+    value: float
+
 class IPPOImplementation:
-    def __init__(self, env):
+    def __init__(self, env, agent_ids: list[str]):
         self.env=env
         self.flat_env = FlatEnv(env)
         agilerl_env = AsyncPettingZooVecEnv([lambda: self.flat_env])
-        observation_spaces = [agilerl_env.single_observation_space(agent) for agent in agilerl_env.agents]
-        action_spaces = [agilerl_env.single_action_space(agent) for agent in agilerl_env.agents]
-        agent_ids = [agent_id for agent_id in agilerl_env.agents]
+        observation_spaces = [
+            agilerl_env.single_observation_space(agent) for agent in agent_ids
+        ]
+        action_spaces = [
+            agilerl_env.single_action_space(agent) for agent in agent_ids
+        ]
         self.agent_ids = agent_ids
         self.agent = IPPO(
             observation_spaces=observation_spaces,
@@ -70,15 +113,31 @@ class IPPOImplementation:
             agent_ids=agent_ids,
         )
 
+        def aggr(agg, aid, info):
+            num_infos = len(info)
+            if agg is None:
+                agg = tuple({} for _ in range(num_infos))
+            for idx, info_field in enumerate(info):
+                agg[idx][aid] = info_field
+            return agg
+
+        def learn(*args, **kwargs):
+            self.agent.learn(*args, **kwargs)
+
         self.learn_barrier = Barrier(
-            consumers = self.agent.agent_ids, producer = self.agent.learn,
-            get_default = lambda: {}, aggregate = lambda agg, aid, info: agg | {aid: info}
+            consumers = self.agent.agent_ids, producer = learn,
+            get_default = lambda: None, aggregate = aggr
         )
 
-    def learn(self, from_: tuple, from_agent_id: str):
-        agent_id = from_agent_id
-        learn_args = from_
-        self.learn_barrier.produce(elem_info=learn_args, elem_id=agent_id)
+    def learn(
+        self, 
+        from_: Experience,
+        for_agent_id: str,
+    ):
+        agent_id = for_agent_id
+        experience=from_
+        experience_tuple = experience.as_experience_tuple()
+        self.learn_barrier.produce(elem_info=experience_tuple, elem_id=agent_id)
 
 
     def make_observations(self, agent_id: str, observation):
@@ -105,16 +164,25 @@ class IPPOImplementation:
                 other_agent_id: {
                     'env_defined_actions': sample_action(for_agent_id= other_agent_id)
                 }
-                for other_agent_id in other_agents_ids
+                for other_agents_id in other_agents_ids
             }
         }
+
+        return infos
 
     def act(self, agent_id: str, observation):
         observations = self.make_observations(agent_id, observation)
         infos = self.make_infos(agent_id)
-        all_agents_actions, _, _, _ = self.agent.get_action(observations, infos)
-        action = all_agents_actions[agent_id][0]
+        actions_tuple: tuple = self.agent.get_action(observations, infos)
+        action_tuple = tuple(
+            elem[agent_id] for elem in actions_tuple
+        )
+        (action, log_prob, entropy, value) = action_tuple
+        action = Action(
+            action=action,
+            log_prob=log_prob,
+            value=value
+        )
         return action
-
 
 
