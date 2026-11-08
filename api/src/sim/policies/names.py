@@ -5,6 +5,7 @@ PolicyName = Literal[
     "q_learning",
     "double_q",
     "ippo",
+    "map_elites",
 ]
 
 PolicyParams = {
@@ -24,4 +25,14 @@ PolicyParams = {
         "epsilon_decay": ["float", 0.99],
     },
     "ippo": {},
+    "map_elites": {
+        "behavior_descriptor": [["entropy_coverage", "entropy_switching", "coverage_change", "switching_change"], "entropy_coverage"],
+        "iterations": ["integer", 400],
+        "evaluation_episodes": ["integer", 3],
+        "hidden_size": ["integer", 16],
+        "bins": ["integer", 8],
+        "mutation_sigma": ["float", 0.2],
+        "mutation_rate": ["float", 0.15],
+        "random_injection": ["float", 0.10],
+    }
 }

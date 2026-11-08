@@ -177,69 +177,68 @@ class SimulationRunner:
 
         try:
             for agent_id, policy in self.policies.items():
-
-                if not policy.requires_optimization():
-                    continue
-
-                sources = {
-                    other_id: (
-                        self.policies[other_id]
-                        if (
-                            other_id != agent_id
-                            and teams[other_id] == teams[agent_id]
-                            and other_id in optimized
-                        )
-                        else baseline.policies[other_id]
+                if on_event is not None:
+                    on_event(
+                        "optimization_started",
+                        {
+                            "agent_id": agent_id,
+                        },
                     )
-                    for other_id in self.policies
-                }
 
-                sources[agent_id] = policy
+                result = None
 
-                evaluator = PolicyEvaluator(
-                    runner=SimulationRunner(
-                        self.config
-                    ),
-                    agent_id=agent_id,
-                    sources=sources,
-                )
-
-                try:
-                    if on_event is not None:
-                        on_event(
-                            "optimization_started",
-                            {
-                                "agent_id": agent_id,
-                            },
-                        )
-
-                    def report(progress):
-                        if on_event is not None:
-                            on_event(
-                                "optimization_progress",
-                                {
-                                    "agent_id": agent_id,
-                                    **progress,
-                                },
+                if policy.requires_optimization():
+                    sources = {
+                        other_id: (
+                            self.policies[other_id]
+                            if (
+                                other_id != agent_id
+                                and teams[other_id] == teams[agent_id]
+                                and other_id in optimized
                             )
+                            else baseline.policies[other_id]
+                        )
+                        for other_id in self.policies
+                    }
 
-                    result = policy.optimize(
-                        evaluator,
-                        report=report,
+                    sources[agent_id] = policy
+
+                    evaluator = PolicyEvaluator(
+                        runner=SimulationRunner(
+                            self.config
+                        ),
+                        agent_id=agent_id,
+                        sources=sources,
                     )
 
-                    results[agent_id] = result
+                    try:
+                        def report(progress):
+                            if on_event is not None:
+                                on_event(
+                                    "optimization_progress",
+                                    {
+                                        "agent_id": agent_id,
+                                        **progress,
+                                    },
+                                )
 
-                    optimized.add(agent_id)
+                        result = policy.optimize(
+                            evaluator,
+                            report=report,
+                        ) | { "agent_id": agent_id }
 
-                    if on_event is not None:
-                        on_event(
-                            "optimization_completed",
-                            result,
-                        )
+                        results[agent_id] = result
 
-                finally:
-                    evaluator.close()
+                        optimized.add(agent_id)
+
+                    finally:
+                        evaluator.close()
+
+                if on_event is not None:
+                    on_event(
+                        "optimization_completed",
+                        result or { "agent_id": agent_id },
+                    )
 
         finally:
             baseline.env.close()

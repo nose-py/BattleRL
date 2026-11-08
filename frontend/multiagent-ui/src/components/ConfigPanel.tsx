@@ -252,8 +252,15 @@ function DynamicParametersEditor({
 
       {entries.map(([name, definition]) => {
         const [type, defaultValue] = definition;
-
         const value = values[name];
+
+        const isEnum = Array.isArray(type);
+
+        const selectedOptionIndex = isEnum
+          ? type.findIndex(
+              (option) => Object.is(option, value)
+            )
+          : -1;
 
         return (
           <label className="field" key={name}>
@@ -261,11 +268,43 @@ function DynamicParametersEditor({
               {name}
 
               <small className="param-type">
-                {type}
+                {isEnum ? "enum" : type}
               </small>
             </span>
 
-            {type === "boolean" ? (
+            {Array.isArray(type) ? (
+              <select
+                value={
+                  selectedOptionIndex >= 0
+                    ? String(selectedOptionIndex)
+                    : ""
+                }
+                onChange={(event) => {
+                  const index = Number(event.target.value);
+
+                  if (
+                    Number.isInteger(index) &&
+                    index >= 0 &&
+                    index < type.length
+                  ) {
+                    onChange(name, type[index]);
+                  }
+                }}
+              >
+                <option value="" disabled>
+                  Select an option
+                </option>
+
+                {type.map((option, index) => (
+                  <option
+                    key={index}
+                    value={String(index)}
+                  >
+                    {String(option)}
+                  </option>
+                ))}
+              </select>
+            ) : type === "boolean" ? (
               <select
                 value={
                   typeof value === "boolean"
@@ -283,13 +322,8 @@ function DynamicParametersEditor({
                   Select a value
                 </option>
 
-                <option value="true">
-                  True
-                </option>
-
-                <option value="false">
-                  False
-                </option>
+                <option value="true">True</option>
+                <option value="false">False</option>
               </select>
             ) : (
               <input

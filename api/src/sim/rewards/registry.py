@@ -1,9 +1,11 @@
 from src.sim.rewards.base_reward import BaseReward
 from src.sim.rewards.event_reward import EventReward
 from src.sim.rewards.teamevent_reward import TeamEventReward
+from src.sim.rewards.team_damage_reward import TeamDamageReward
 from src.sim.rewards.progress_reward import ProgressReward
 from src.sim.rewards.teamprogress_reward import TeamProgressReward
 from src.sim.rewards.firstgoal_reward import FirstGoalReward
+from src.sim.rewards.team_firstgoal_reward import TeamFirstGoalReward
 from src.sim.rewards.teamrank_reward import TeamRankReward
 from src.sim.rewards.constant_reward import ConstantReward
 from src.sim.rewards.invalid_move_reward import InvalidMoveReward
@@ -16,7 +18,9 @@ REWARD_REGISTRY = {
     "progress": ProgressReward,
     "team_progress": TeamProgressReward,
     "first_goal": FirstGoalReward,
+    "team_first_goal": TeamFirstGoalReward,
     "team_rank": TeamRankReward,
+    "team_damage": TeamDamageReward,
     "constant": ConstantReward,
     "invalid_move": InvalidMoveReward,
 }

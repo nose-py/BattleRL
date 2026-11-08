@@ -11,12 +11,16 @@ from src.sim.policies.IPPO.ppo import (
     IPPO
 )
 
+from src.sim.policies.map_elites_policy import (
+    MAPElitesPolicy,
+)
 
 POLICY_REGISTRY = {
     "random": RandomPolicy,
     "q_learning": QLearningPolicy,
     "double_q": DoubleQLearningPolicy,
-    "ippo": IPPO
+    "ippo": IPPO,
+    "map_elites": MAPElitesPolicy,
 }
 
 

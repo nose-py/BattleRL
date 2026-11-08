@@ -15,7 +15,8 @@ export type ParameterDefinition =
   | ["integer", number]
   | ["float", number]
   | ["string", string]
-  | ["boolean", boolean];
+  | ["boolean", boolean]
+  | [ParameterValue[], ParameterValue];
 
 export type ParameterSchema = Record<
   string,

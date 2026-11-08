@@ -6,7 +6,9 @@ RewardName = Literal[
     "progress",
     "team_progress",
     "first_goal",
+    "team_first_goal",
     "team_rank",
+    "team_damage",
     "constant",
     "invalid_move",
 ]
