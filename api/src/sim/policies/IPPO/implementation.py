@@ -1,5 +1,3 @@
-from .flatten import FlatEnv
-
 import logging
 import numpy as np
 
@@ -72,22 +70,18 @@ class Experience:
     next_done: bool #Receive as arg
 
     def as_experience_tuple(self) -> tuple:
-        unsqueezed_tup = (
-            self.state, 
-            self.action, 
-            self.log_prob, 
-            self.reward, 
-            self.done, 
-            self.value, 
-            self.next_ob, 
-            self.next_done, 
+        # Each call represents exactly one timestep. Preserve the leading
+        # timestep dimension for observations and scalar fields.
+        return (
+            np.expand_dims(np.asarray(self.state, dtype=np.float32), axis=0),
+            np.asarray(self.action).reshape(-1),
+            np.asarray(self.log_prob).reshape(1),
+            np.asarray(self.reward).reshape(1),
+            np.asarray([self.done], dtype=np.float32),
+            np.asarray(self.value).reshape(1),
+            np.expand_dims(np.asarray(self.next_ob, dtype=np.float32), axis=0),
+            np.asarray([self.next_done], dtype=np.float32),
         )
-        print(unsqueezed_tup)
-        squeezed_tup = tuple(
-            np.array([[e]])
-            for e in unsqueezed_tup
-        )
-        return squeezed_tup
 
 @dataclass(frozen=True)
 class Action:
@@ -96,10 +90,12 @@ class Action:
     value: float
 
 class IPPOImplementation:
+    rollout_length = 2
+
     def __init__(self, env, agent_ids: list[str]):
         self.env=env
-        self.flat_env = FlatEnv(env)
-        agilerl_env = AsyncPettingZooVecEnv([lambda: self.flat_env])
+        #self.flat_env = FlatEnv(env)
+        agilerl_env = AsyncPettingZooVecEnv([lambda: self.env])
         observation_spaces = [
             agilerl_env.single_observation_space(agent) for agent in agent_ids
         ]
@@ -121,13 +117,41 @@ class IPPOImplementation:
                 agg[idx][aid] = info_field
             return agg
 
-        def learn(*args, **kwargs):
-            self.agent.learn(*args, **kwargs)
-
         self.learn_barrier = Barrier(
-            consumers = self.agent.agent_ids, producer = learn,
+            consumers = self.agent.agent_ids, producer = self._collect_and_learn,
             get_default = lambda: None, aggregate = aggr
         )
+
+        self.rollout = {agent_id: [] for agent_id in self.agent_ids}
+
+    def _collect_and_learn(self, experiences):
+        # The barrier gives one transition for every agent at each timestep.
+        for agent_id in self.agent_ids:
+            transition = tuple(field[agent_id] for field in experiences)
+            self.rollout[agent_id].append(transition)
+
+        if len(next(iter(self.rollout.values()))) < self.rollout_length:
+            return
+
+        # AgileRL expects lists of per-timestep arrays for the six rollout
+        # fields, plus only the final next state and done for GAE bootstrap.
+        rollout_fields = tuple(
+            {
+                agent_id: [row[field_index] for row in rows]
+                for agent_id, rows in self.rollout.items()
+            }
+            for field_index in range(6)
+        )
+        next_states = {
+            agent_id: rows[-1][6]
+            for agent_id, rows in self.rollout.items()
+        }
+        next_dones = {
+            agent_id: rows[-1][7]
+            for agent_id, rows in self.rollout.items()
+        }
+        self.agent.learn((*rollout_fields, next_states, next_dones))
+        self.rollout = {agent_id: [] for agent_id in self.agent_ids}
 
     def learn(
         self, 
@@ -149,14 +173,14 @@ class IPPOImplementation:
                 for other_agent_id in other_agents_ids
             }
         }
-        flat_obs = self.flat_env._flatten(observations)
-        return flat_obs
+        #flat_obs = self.flat_env._flatten(observations)
+        return observations
 
     def make_infos(self, agent_id):
         other_agents_ids = set(self.agent_ids) - {agent_id}
 
         def sample_action(for_agent_id: str):
-            return self.flat_env.action_space(for_agent_id).sample()
+            return self.env.action_space(for_agent_id).sample()
 
         infos = {
             agent_id: {'env_defined_actions': None},

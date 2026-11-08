@@ -39,13 +39,18 @@ class FlatEnv(ParallelEnv):
             infos,
         )
 
-    def _flatten(self, observations):
-        return {
-            agent: spaces.flatten(
+    def _flatten_observation(self, observation, for_agent: str):
+        agent=for_agent
+        return spaces.flatten(
                 self.env.observation_space(agent), observation
-            ).astype(np.float32)
+        ).astype(np.float32)
+
+    def _flatten(self, observations):
+        d = {
+            agent: self._flatten_observation(observation, for_agent=agent)
             for agent, observation in observations.items()
         }
+        return d
 
     def render(self):
         return self.env.render()
