@@ -169,7 +169,7 @@ class IPPOImplementation:
         observations = {
             agent_id: observation,
             **{
-                other_agent_id: self.env.observation_spaces[other_agent_id].sample()
+                other_agent_id: self.env.observation_space(other_agent_id).sample()
                 for other_agent_id in other_agents_ids
             }
         }
@@ -188,7 +188,7 @@ class IPPOImplementation:
                 other_agent_id: {
                     'env_defined_actions': sample_action(for_agent_id= other_agent_id)
                 }
-                for other_agents_id in other_agents_ids
+                for other_agent_id in other_agents_ids
             }
         }
 
