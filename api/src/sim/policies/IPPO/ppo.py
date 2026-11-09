@@ -88,7 +88,8 @@ class IPPO(BasePolicy):
         agent_id=self.spec.id
         observation = self.flat_env._flatten_observation(observation, for_agent=agent_id)
         action=self.ippo.act(agent_id=agent_id, observation=observation)
-        self.action_buffer.write(action, for_item=agent_id)
+        if training:
+            self.action_buffer.write(action, for_item=agent_id)
         return int(action.action[0])
 
     def learn(
