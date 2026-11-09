@@ -1,7 +1,9 @@
+from pathlib import Path
+
+from .flatten import FlatEnv
 from .implementation import IPPOImplementation, Action, Experience
 from src.sim.policies.base_policy import BasePolicy
 
-from agilerl.algorithms import IPPO
 from collections import defaultdict
 from typing import Callable
 
@@ -48,6 +50,7 @@ class Latch:
 
 class IPPO(BasePolicy):
 
+    kind = "ippo"
     _ippo_agent = None
     _curr_env = None
 
@@ -76,12 +79,14 @@ class IPPO(BasePolicy):
             for agent in env.config.agents
             if agent.policy == "ippo"
         ]
-        self.ippo = IPPO.get_ippo_agent(env, agent_ids)
+        self.flat_env = FlatEnv(env)
+        self.ippo = IPPO.get_ippo_agent(self.flat_env, agent_ids)
         self.action_buffer = Buffer(items=agent_ids)
         self.latches = {agent_id: Latch() for agent_id in agent_ids}
 
     def act(self, observation, training: bool) -> int:
         agent_id=self.spec.id
+        observation = self.flat_env._flatten_observation(observation, for_agent=agent_id)
         action=self.ippo.act(agent_id=agent_id, observation=observation)
         self.action_buffer.write(action, for_item=agent_id)
         return int(action.action[0])
@@ -95,10 +100,21 @@ class IPPO(BasePolicy):
         done,
     ):
         agent_id=self.spec.id
+        observation = self.flat_env._flatten_observation(observation, for_agent=agent_id)
+        # PettingZoo may omit observations for agents that just terminated.
+        # The terminal mask prevents bootstrapping from this placeholder.
+        if next_observation is None:
+            next_observation = observation
+        else:
+            next_observation = self.flat_env._flatten_observation(
+                next_observation, for_agent=agent_id
+            )
         next_done = done
         done = self.latches[agent_id].read()
+        if done:
+            self.latches[agent_id].reset()
         action = self.action_buffer.read(for_item=agent_id)
-        if next_done: 
+        if next_done:
             self.latches[agent_id].set()
 
 
@@ -117,12 +133,36 @@ class IPPO(BasePolicy):
         self.ippo.learn(from_=experience, for_agent_id=agent_id)
 
     def load_state(self, data: dict):
-        ippo = data["ippo"]
-        self.ippo = ippo
+        if data.get("kind") != self.kind:
+            raise ValueError("Checkpoint is not an IPPO policy state")
+
+        checkpoint_name = data.get("checkpoint")
+        if (
+            not isinstance(checkpoint_name, str)
+            or Path(checkpoint_name).name != checkpoint_name
+            or Path(checkpoint_name).suffix != ".ckpt"
+        ):
+            raise ValueError("IPPO state must name a local .ckpt artifact")
+
+        self._checkpoint_name = checkpoint_name
     
     def save_state(self):
         return {
-            "ippo": self.ippo
+            "kind": self.kind,
+            "checkpoint": getattr(
+                self, "_checkpoint_name", f"{self.spec.id}.ckpt"
+            ),
         }
+
+    def save_artifacts(self, folder):
+        checkpoint_path = Path(folder) / self.save_state()["checkpoint"]
+        self.ippo.agent.save_checkpoint(str(checkpoint_path))
+
+    def load_artifacts(self, folder):
+        checkpoint_name = getattr(
+            self, "_checkpoint_name", f"{self.spec.id}.ckpt"
+        )
+        checkpoint_path = Path(folder) / checkpoint_name
+        self.ippo.agent.load_checkpoint(str(checkpoint_path))
 
 
