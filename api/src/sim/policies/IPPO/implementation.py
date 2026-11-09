@@ -1,120 +1,199 @@
-from .flatten import FlatEnv
+import numpy as np
 
-import logging
-
-from threading import Lock, Thread
+from dataclasses import dataclass
 from agilerl.vector.pz_async_vec_env import AsyncPettingZooVecEnv
 from agilerl.algorithms import IPPO
 
-logger = logging.getLogger(__name__)
+@dataclass(frozen=True)
+class Experience:
+    state: any #Receive as arg
+    action: any #Get from get_action
+    log_prob: any #Get from get_action
+    reward: any #Receive as arg
+    done: bool #Buffer
+    value: any #Get from get_action
+    next_ob: any #Receive as arg
+    next_done: bool #Receive as arg
 
-class Barrier:
-    def __init__(
-        self, consumers: list[str],
-        producer: callable, 
-        aggregate: callable, get_default: callable
-    ):
-        self._produce=producer
-        self._aggregate=aggregate
-        self.get_default=get_default
-        self.elem_ids = consumers
-        self.reset()
+    def as_experience_tuple(self) -> tuple:
+        # Each call represents exactly one timestep. Preserve the leading
+        # timestep dimension for observations and scalar fields.
+        return (
+            np.expand_dims(np.asarray(self.state, dtype=np.float32), axis=0),
+            np.asarray(self.action).reshape(-1),
+            np.asarray(self.log_prob).reshape(1),
+            np.asarray(self.reward).reshape(1),
+            np.asarray([self.done], dtype=np.float32),
+            np.asarray(self.value).reshape(1),
+            np.expand_dims(np.asarray(self.next_ob, dtype=np.float32), axis=0),
+            np.asarray([self.next_done], dtype=np.float32),
+        )
 
-    def reset_consumed_lut(self): 
-        self.consumed_lut = {
-            elem_id: False
-            for elem_id in self.elem_ids
-        }
-
-    def set_consumed(self, elem_id: str):
-        if not elem_id in self.elem_ids:
-            raise ValueError(f"{elem_id} not in batch consumers")
-        self.consumed_lut[elem_id]=True
-
-    def has_consumed(self, elem_id: str) -> bool:
-        if not elem_id in self.elem_ids:
-            raise ValueError(f"{elem_id} not in batch consumers")
-        return self.consumed_lut[elem_id]
-
-    def all_consumed(self) -> bool:
-        return all([self.has_consumed(elem_id) for elem_id in self.elem_ids])
-
-    def aggregate(self, elem_id, elem_info):
-        self._aggregate(self.aggregation, elem_id, elem_info)
-
-    def reset(self):
-        self.reset_consumed_lut()
-        self.aggregation = self.get_default()
-
-    def produce(self, elem_id: str, elem_info):
-        if self.has_consumed(elem_id):
-            raise ValueError(f"Consumer {elem_id} tried to consume twice, when other consumers have not consumed yet")
-        self.aggregate(elem_id, elem_info)
-        if self.all_consumed():
-            production = self._produce(self.aggregation)
-            self.reset()
-            return production
+@dataclass(frozen=True)
+class Action:
+    action: int
+    log_prob: float
+    value: float
 
 class IPPOImplementation:
-    def __init__(self, env):
+    rollout_length = 2
+
+    def __init__(self, env, agent_ids: list[str]):
         self.env=env
-        self.flat_env = FlatEnv(env)
-        agilerl_env = AsyncPettingZooVecEnv([lambda: self.flat_env])
-        observation_spaces = [agilerl_env.single_observation_space(agent) for agent in agilerl_env.agents]
-        action_spaces = [agilerl_env.single_action_space(agent) for agent in agilerl_env.agents]
-        agent_ids = [agent_id for agent_id in agilerl_env.agents]
+        #self.flat_env = FlatEnv(env)
+        raw_env = getattr(env, "env", env)
+        configured_agents = getattr(
+            getattr(raw_env, "config", None), "agents", ()
+        )
+        team_by_agent_id = {
+            agent.id: agent.team for agent in configured_agents
+        }
+        team_indexes = {}
+        self.network_agent_ids = {}
+        for agent_id in agent_ids:
+            team = team_by_agent_id.get(agent_id, agent_id)
+            team_index = team_indexes.get(team, 0)
+            team_indexes[team] = team_index + 1
+            self.network_agent_ids[agent_id] = f"{team}_{team_index}"
+
+        agilerl_env = AsyncPettingZooVecEnv([lambda: self.env])
+        observation_spaces = [
+            agilerl_env.single_observation_space(agent) for agent in agent_ids
+        ]
+        action_spaces = [
+            agilerl_env.single_action_space(agent) for agent in agent_ids
+        ]
         self.agent_ids = agent_ids
         self.agent = IPPO(
             observation_spaces=observation_spaces,
             action_spaces=action_spaces,
-            agent_ids=agent_ids,
+            agent_ids=[self.network_agent_ids[agent_id] for agent_id in agent_ids],
         )
 
-        self.learn_barrier = Barrier(
-            consumers = self.agent.agent_ids, producer = self.agent.learn,
-            get_default = lambda: {}, aggregate = lambda agg, aid, info: agg | {aid: info}
-        )
+        self.rollout = {agent_id: [] for agent_id in self.agent_ids}
+        self.last_transitions = {agent_id: None for agent_id in self.agent_ids}
 
-    def learn(self, from_: tuple, from_agent_id: str):
-        agent_id = from_agent_id
-        learn_args = from_
-        self.learn_barrier.produce(elem_info=learn_args, elem_id=agent_id)
+    def _collect_and_learn(self, transition, agent_id):
+        self.rollout[agent_id].append(transition)
+        self.last_transitions[agent_id] = transition
+
+        if len(self.rollout[agent_id]) < self.rollout_length:
+            return
+
+        # IPPO.learn expects all configured agent groups. A peer that has fewer
+        # than two fresh transitions gets a neutral terminal sample so a dead
+        # or masked agent cannot hold up the other agents' updates.
+        batches = {}
+        remaining_rollouts = {}
+        for current_agent_id in self.agent_ids:
+            rows = list(self.rollout[current_agent_id])
+            if len(rows) >= self.rollout_length:
+                batches[current_agent_id] = rows[: self.rollout_length]
+                remaining_rollouts[current_agent_id] = rows[self.rollout_length :]
+                continue
+
+            previous = rows[-1] if rows else self.last_transitions[current_agent_id]
+            if previous is None:
+                return
+
+            def neutral_terminal_sample(transition):
+                return (
+                    transition[0],
+                    transition[1],
+                    transition[2],
+                    np.zeros_like(transition[3]),
+                    np.ones_like(transition[4]),
+                    np.zeros_like(transition[5]),
+                    transition[6],
+                    np.ones_like(transition[7]),
+                )
+
+            batches[current_agent_id] = rows + [
+                neutral_terminal_sample(previous)
+                for _ in range(self.rollout_length - len(rows))
+            ]
+            remaining_rollouts[current_agent_id] = []
+
+        # AgileRL expects lists of per-timestep arrays for the six rollout
+        # fields, plus only the final next state and done for GAE bootstrap.
+        rollout_fields = tuple(
+            {
+                self.network_agent_ids[current_agent_id]: [
+                    row[field_index] for row in rows
+                ]
+                for current_agent_id, rows in batches.items()
+            }
+            for field_index in range(6)
+        )
+        next_states = {
+            self.network_agent_ids[current_agent_id]: rows[-1][6]
+            for current_agent_id, rows in batches.items()
+        }
+        next_dones = {
+            self.network_agent_ids[current_agent_id]: rows[-1][7]
+            for current_agent_id, rows in batches.items()
+        }
+        self.agent.learn((*rollout_fields, next_states, next_dones))
+        self.rollout = remaining_rollouts
+
+    def learn(
+        self, 
+        from_: Experience,
+        for_agent_id: str,
+    ):
+        agent_id = for_agent_id
+        experience=from_
+        experience_tuple = experience.as_experience_tuple()
+        self._collect_and_learn(experience_tuple, agent_id)
 
 
     def make_observations(self, agent_id: str, observation):
         other_agents_ids = set(self.agent_ids) - {agent_id}
+        network_agent_id = self.network_agent_ids[agent_id]
         observations = {
-            agent_id: observation,
+            network_agent_id: observation,
             **{
-                other_agent_id: self.env.observation_spaces[other_agent_id].sample()
+                self.network_agent_ids[other_agent_id]: (
+                    self.env.observation_space(other_agent_id).sample()
+                )
                 for other_agent_id in other_agents_ids
             }
         }
-        flat_obs = self.flat_env._flatten(observations)
-        return flat_obs
+        #flat_obs = self.flat_env._flatten(observations)
+        return observations
 
     def make_infos(self, agent_id):
         other_agents_ids = set(self.agent_ids) - {agent_id}
+        network_agent_id = self.network_agent_ids[agent_id]
 
         def sample_action(for_agent_id: str):
-            return self.flat_env.action_space(for_agent_id).sample()
+            return self.env.action_space(for_agent_id).sample()
 
         infos = {
-            agent_id: {'env_defined_actions': None},
+            network_agent_id: {'env_defined_actions': None},
             **{
-                other_agent_id: {
+                self.network_agent_ids[other_agent_id]: {
                     'env_defined_actions': sample_action(for_agent_id= other_agent_id)
                 }
                 for other_agent_id in other_agents_ids
             }
         }
 
+        return infos
+
     def act(self, agent_id: str, observation):
         observations = self.make_observations(agent_id, observation)
         infos = self.make_infos(agent_id)
-        all_agents_actions, _, _, _ = self.agent.get_action(observations, infos)
-        action = all_agents_actions[agent_id][0]
+        actions_tuple: tuple = self.agent.get_action(observations, infos)
+        action_tuple = tuple(
+            elem[self.network_agent_ids[agent_id]] for elem in actions_tuple
+        )
+        (action, log_prob, entropy, value) = action_tuple
+        action = Action(
+            action=action,
+            log_prob=log_prob,
+            value=value
+        )
         return action
-
 
 

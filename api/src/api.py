@@ -2,6 +2,7 @@ import asyncio
 import json
 import threading
 from dataclasses import dataclass
+import traceback
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
@@ -248,6 +249,7 @@ def step_session(
                 training=False,
             )
         except (ValueError, RuntimeError) as exc:
+            traceback.print_exc()
             raise HTTPException(400, str(exc))
 
 
