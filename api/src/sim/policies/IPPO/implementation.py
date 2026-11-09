@@ -41,6 +41,21 @@ class IPPOImplementation:
     def __init__(self, env, agent_ids: list[str]):
         self.env=env
         #self.flat_env = FlatEnv(env)
+        raw_env = getattr(env, "env", env)
+        configured_agents = getattr(
+            getattr(raw_env, "config", None), "agents", ()
+        )
+        team_by_agent_id = {
+            agent.id: agent.team for agent in configured_agents
+        }
+        team_indexes = {}
+        self.network_agent_ids = {}
+        for agent_id in agent_ids:
+            team = team_by_agent_id.get(agent_id, agent_id)
+            team_index = team_indexes.get(team, 0)
+            team_indexes[team] = team_index + 1
+            self.network_agent_ids[agent_id] = f"{team}_{team_index}"
+
         agilerl_env = AsyncPettingZooVecEnv([lambda: self.env])
         observation_spaces = [
             agilerl_env.single_observation_space(agent) for agent in agent_ids
@@ -52,7 +67,7 @@ class IPPOImplementation:
         self.agent = IPPO(
             observation_spaces=observation_spaces,
             action_spaces=action_spaces,
-            agent_ids=agent_ids,
+            agent_ids=[self.network_agent_ids[agent_id] for agent_id in agent_ids],
         )
 
         self.rollout = {agent_id: [] for agent_id in self.agent_ids}
@@ -103,17 +118,19 @@ class IPPOImplementation:
         # fields, plus only the final next state and done for GAE bootstrap.
         rollout_fields = tuple(
             {
-                current_agent_id: [row[field_index] for row in rows]
+                self.network_agent_ids[current_agent_id]: [
+                    row[field_index] for row in rows
+                ]
                 for current_agent_id, rows in batches.items()
             }
             for field_index in range(6)
         )
         next_states = {
-            current_agent_id: rows[-1][6]
+            self.network_agent_ids[current_agent_id]: rows[-1][6]
             for current_agent_id, rows in batches.items()
         }
         next_dones = {
-            current_agent_id: rows[-1][7]
+            self.network_agent_ids[current_agent_id]: rows[-1][7]
             for current_agent_id, rows in batches.items()
         }
         self.agent.learn((*rollout_fields, next_states, next_dones))
@@ -132,10 +149,13 @@ class IPPOImplementation:
 
     def make_observations(self, agent_id: str, observation):
         other_agents_ids = set(self.agent_ids) - {agent_id}
+        network_agent_id = self.network_agent_ids[agent_id]
         observations = {
-            agent_id: observation,
+            network_agent_id: observation,
             **{
-                other_agent_id: self.env.observation_space(other_agent_id).sample()
+                self.network_agent_ids[other_agent_id]: (
+                    self.env.observation_space(other_agent_id).sample()
+                )
                 for other_agent_id in other_agents_ids
             }
         }
@@ -144,14 +164,15 @@ class IPPOImplementation:
 
     def make_infos(self, agent_id):
         other_agents_ids = set(self.agent_ids) - {agent_id}
+        network_agent_id = self.network_agent_ids[agent_id]
 
         def sample_action(for_agent_id: str):
             return self.env.action_space(for_agent_id).sample()
 
         infos = {
-            agent_id: {'env_defined_actions': None},
+            network_agent_id: {'env_defined_actions': None},
             **{
-                other_agent_id: {
+                self.network_agent_ids[other_agent_id]: {
                     'env_defined_actions': sample_action(for_agent_id= other_agent_id)
                 }
                 for other_agent_id in other_agents_ids
@@ -165,7 +186,7 @@ class IPPOImplementation:
         infos = self.make_infos(agent_id)
         actions_tuple: tuple = self.agent.get_action(observations, infos)
         action_tuple = tuple(
-            elem[agent_id] for elem in actions_tuple
+            elem[self.network_agent_ids[agent_id]] for elem in actions_tuple
         )
         (action, log_prob, entropy, value) = action_tuple
         action = Action(
