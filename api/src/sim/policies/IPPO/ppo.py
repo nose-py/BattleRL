@@ -53,23 +53,29 @@ class IPPO(BasePolicy):
     kind = "ippo"
     _ippo_agent = None
     _curr_env = None
+    _flat_env = None
+    _agent_ids = None
 
     @classmethod
-    @property
     def agent_not_set(cls) -> bool:
         return cls._ippo_agent is None
     
     @classmethod
     def env_changed(cls, possible_new_env) -> bool:
-        if cls._curr_env is not None:
-            return possible_new_env != cls._curr_env
-        return possible_new_env is not None
+        return possible_new_env is not cls._curr_env
 
     @classmethod
     def get_ippo_agent(cls, env, agent_ids):
-        if cls.env_changed(possible_new_env=env) or cls.agent_not_set:
-            cls._ippo_agent = IPPOImplementation(env, agent_ids)
+        configured_agent_ids = tuple(agent_ids)
+        if (
+            cls.env_changed(possible_new_env=env)
+            or cls.agent_not_set()
+            or configured_agent_ids != cls._agent_ids
+        ):
             cls._curr_env = env
+            cls._flat_env = FlatEnv(env)
+            cls._ippo_agent = IPPOImplementation(cls._flat_env, agent_ids)
+            cls._agent_ids = configured_agent_ids
         return cls._ippo_agent
     
     def __init__(self, spec, n_actions: int, seed: int, env):
@@ -79,8 +85,8 @@ class IPPO(BasePolicy):
             for agent in env.config.agents
             if agent.policy == "ippo"
         ]
-        self.flat_env = FlatEnv(env)
-        self.ippo = IPPO.get_ippo_agent(self.flat_env, agent_ids)
+        self.ippo = IPPO.get_ippo_agent(env, agent_ids)
+        self.flat_env = IPPO._flat_env
         self.action_buffer = Buffer(items=agent_ids)
         self.latches = {agent_id: Latch() for agent_id in agent_ids}
 

@@ -1,62 +1,8 @@
-import logging
 import numpy as np
 
 from dataclasses import dataclass
-from threading import Lock, Thread
 from agilerl.vector.pz_async_vec_env import AsyncPettingZooVecEnv
 from agilerl.algorithms import IPPO
-
-logger = logging.getLogger(__name__)
-
-class Barrier:
-    def __init__(
-        self, consumers: list[str],
-        producer: callable, 
-        aggregate: callable, get_default: callable
-    ):
-        self._produce=producer
-        self._aggregate=aggregate
-        self.get_default=get_default
-        self.elem_ids = consumers
-        self.reset()
-
-    def reset_consumed_lut(self): 
-        self.consumed_lut = {
-            elem_id: False
-            for elem_id in self.elem_ids
-        }
-
-    def set_consumed(self, elem_id: str):
-        if not elem_id in self.elem_ids:
-            raise ValueError(f"{elem_id} not in batch consumers")
-        self.consumed_lut[elem_id]=True
-
-    def has_consumed(self, elem_id: str) -> bool:
-        if not elem_id in self.elem_ids:
-            raise ValueError(f"{elem_id} not in batch consumers")
-        return self.consumed_lut[elem_id]
-
-    def all_consumed(self) -> bool:
-        return all([self.has_consumed(elem_id) for elem_id in self.elem_ids])
-
-    def aggregate(self, elem_id, elem_info):
-        self.aggregation = self._aggregate(self.aggregation, elem_id, elem_info)
-
-    def reset(self):
-        self.reset_consumed_lut()
-        self.aggregation = self.get_default()
-
-    def produce(self, elem_id: str, elem_info):
-        if self.has_consumed(elem_id):
-            raise ValueError(f"Consumer {elem_id} tried to consume twice, when other consumers have not consumed yet")
-        self.aggregate(elem_id, elem_info)
-        self.set_consumed(elem_id)
-        if self.all_consumed():
-            production = self._produce(self.aggregation)
-            self.reset()
-            return production
-
-
 
 @dataclass(frozen=True)
 class Experience:
@@ -109,49 +55,69 @@ class IPPOImplementation:
             agent_ids=agent_ids,
         )
 
-        def aggr(agg, aid, info):
-            num_infos = len(info)
-            if agg is None:
-                agg = tuple({} for _ in range(num_infos))
-            for idx, info_field in enumerate(info):
-                agg[idx][aid] = info_field
-            return agg
-
-        self.learn_barrier = Barrier(
-            consumers = self.agent.agent_ids, producer = self._collect_and_learn,
-            get_default = lambda: None, aggregate = aggr
-        )
-
         self.rollout = {agent_id: [] for agent_id in self.agent_ids}
+        self.last_transitions = {agent_id: None for agent_id in self.agent_ids}
 
-    def _collect_and_learn(self, experiences):
-        # The barrier gives one transition for every agent at each timestep.
-        for agent_id in self.agent_ids:
-            transition = tuple(field[agent_id] for field in experiences)
-            self.rollout[agent_id].append(transition)
+    def _collect_and_learn(self, transition, agent_id):
+        self.rollout[agent_id].append(transition)
+        self.last_transitions[agent_id] = transition
 
-        if len(next(iter(self.rollout.values()))) < self.rollout_length:
+        if len(self.rollout[agent_id]) < self.rollout_length:
             return
+
+        # IPPO.learn expects all configured agent groups. A peer that has fewer
+        # than two fresh transitions gets a neutral terminal sample so a dead
+        # or masked agent cannot hold up the other agents' updates.
+        batches = {}
+        remaining_rollouts = {}
+        for current_agent_id in self.agent_ids:
+            rows = list(self.rollout[current_agent_id])
+            if len(rows) >= self.rollout_length:
+                batches[current_agent_id] = rows[: self.rollout_length]
+                remaining_rollouts[current_agent_id] = rows[self.rollout_length :]
+                continue
+
+            previous = rows[-1] if rows else self.last_transitions[current_agent_id]
+            if previous is None:
+                return
+
+            def neutral_terminal_sample(transition):
+                return (
+                    transition[0],
+                    transition[1],
+                    transition[2],
+                    np.zeros_like(transition[3]),
+                    np.ones_like(transition[4]),
+                    np.zeros_like(transition[5]),
+                    transition[6],
+                    np.ones_like(transition[7]),
+                )
+
+            batches[current_agent_id] = rows + [
+                neutral_terminal_sample(previous)
+                for _ in range(self.rollout_length - len(rows))
+            ]
+            remaining_rollouts[current_agent_id] = []
 
         # AgileRL expects lists of per-timestep arrays for the six rollout
         # fields, plus only the final next state and done for GAE bootstrap.
         rollout_fields = tuple(
             {
-                agent_id: [row[field_index] for row in rows]
-                for agent_id, rows in self.rollout.items()
+                current_agent_id: [row[field_index] for row in rows]
+                for current_agent_id, rows in batches.items()
             }
             for field_index in range(6)
         )
         next_states = {
-            agent_id: rows[-1][6]
-            for agent_id, rows in self.rollout.items()
+            current_agent_id: rows[-1][6]
+            for current_agent_id, rows in batches.items()
         }
         next_dones = {
-            agent_id: rows[-1][7]
-            for agent_id, rows in self.rollout.items()
+            current_agent_id: rows[-1][7]
+            for current_agent_id, rows in batches.items()
         }
         self.agent.learn((*rollout_fields, next_states, next_dones))
-        self.rollout = {agent_id: [] for agent_id in self.agent_ids}
+        self.rollout = remaining_rollouts
 
     def learn(
         self, 
@@ -161,7 +127,7 @@ class IPPOImplementation:
         agent_id = for_agent_id
         experience=from_
         experience_tuple = experience.as_experience_tuple()
-        self.learn_barrier.produce(elem_info=experience_tuple, elem_id=agent_id)
+        self._collect_and_learn(experience_tuple, agent_id)
 
 
     def make_observations(self, agent_id: str, observation):
