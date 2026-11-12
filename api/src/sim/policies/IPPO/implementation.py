@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 from dataclasses import dataclass
 from agilerl.vector.pz_async_vec_env import AsyncPettingZooVecEnv
@@ -68,6 +69,7 @@ class IPPOImplementation:
             observation_spaces=observation_spaces,
             action_spaces=action_spaces,
             agent_ids=[self.network_agent_ids[agent_id] for agent_id in agent_ids],
+            device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
         )
 
         self.rollout = {agent_id: [] for agent_id in self.agent_ids}

@@ -1,6 +1,10 @@
 import math
+import torch
 
-import numpy as np
+if torch.cuda.is_available():
+    import cupy as np
+else:
+    import numpy as np
 
 from src.sim.policies.base_policy import BasePolicy
 
