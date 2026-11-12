@@ -33,8 +33,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-training_manager = TrainingManager()
-
 
 class TrainingRequest(BaseModel):
     config: SimulationConfig
@@ -71,6 +69,7 @@ class Session:
 
 sessions: dict[str, Session] = {}
 sessions_lock = threading.Lock()
+training_manager = TrainingManager()
 
 
 def get_session(session_id: str) -> Session:
