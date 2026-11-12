@@ -322,3 +322,32 @@ def load_trained_runner(training_id: str):
         policy.load_artifacts(folder)
 
     return runner
+
+class SingleTrainingManager:
+    def __init__(self):
+        self.jobs = {}
+
+    def start(self, config: SimulationConfig, episodes: int):
+        training_id = str(uuid4())
+        job = TrainingJob(training_id, episodes)
+
+        self.jobs[training_id] = job
+
+        try:
+            train_worker(
+                config.model_dump(mode="json"),
+                episodes,
+                training_id,
+                None,
+            )
+        except Exception as exc:
+            job.add_event({
+                "type": "error",
+                "data": {"message": str(exc)},
+            })
+            raise
+
+        return job
+
+    def get(self, training_id):
+        return self.jobs.get(training_id)

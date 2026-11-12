@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from src.api import TrainingRequest, create_training
+from src.sim.jobs import SingleTrainingManager
 
 
 def main() -> None:
@@ -21,8 +22,10 @@ def main() -> None:
         request_data = json.load(request_file)
 
     request = TrainingRequest.model_validate(request_data)
-    result = create_training(request)
-    print(json.dumps(result))
+    job = training_manager.start(
+        config=request.config,
+        episodes=request.episodes,
+    )
 
 
 if __name__ == "__main__":
