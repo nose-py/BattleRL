@@ -12,6 +12,7 @@ import {
   Box,
   CheckCircle2,
   Crosshair,
+  Database,
   Layers3,
   RefreshCw,
   X,
@@ -20,6 +21,12 @@ import {
 import type {
   StepSnapshot,
 } from "./types/simulation";
+
+import ExistingTrainingPanel, {
+  type WorkspaceMode,
+} from "./components/ExistingTrainingPanel";
+
+import TrainingOverviewPanel from "./components/TrainingOverviewPanel";
 
 import RewardsPanel from "./components/RewardsPanel";
 
@@ -52,6 +59,7 @@ import type {
   SessionResponse,
   SimulationConfig,
   VisualEffect,
+  TrainingStatus,
 } from "./types/simulation";
 
 type BusyAction =
@@ -105,10 +113,30 @@ export default function App() {
     useState<SimulationConfig | null>(null);
 
   const [sessionWorldLimits, setSessionWorldLimits] =
-    useState({
+    useState<{
+      maxHealth: number;
+      maxSteps: number | null;
+    }>({
       maxHealth: 3,
-      maxSteps: 100,
+      maxSteps: null,
     });
+
+  const [workspaceMode, setWorkspaceMode] =
+  useState<WorkspaceMode>("new");
+
+  const [existingTrainingId, setExistingTrainingId] =
+    useState("");
+
+  const [existingTraining, setExistingTraining] =
+    useState<TrainingStatus | null>(null);
+
+  const [loadingExistingTraining, setLoadingExistingTraining] =
+    useState(false);
+
+  const existingTrainingReady = Boolean(
+    existingTraining &&
+    isTrainingSuccessful(existingTraining.status)
+  );
 
   const training = useTraining();
 
@@ -156,7 +184,15 @@ export default function App() {
     [config]
   );
 
-  const worldState = session?.state ?? preview;
+  const worldState =
+    session?.state ??
+    (
+      workspaceMode === "existing"
+        ? existingTraining?.config
+          ? previewState(existingTraining.config)
+          : null
+        : preview
+    );
 
   const trainingReady = Boolean(
     training.created &&
@@ -178,9 +214,12 @@ export default function App() {
   const handleCellClick = (point: Point) => {
     setSelectedCell(point);
 
-    // An active session represents the authoritative state
-    // from the backend, so it is not visually modified.
-    if (!config || session || editTool === "inspect") {
+    if (
+      !config ||
+      session ||
+      workspaceMode !== "new" ||
+      editTool === "inspect"
+    ) {
       return;
     }
 
@@ -287,73 +326,222 @@ export default function App() {
     }
   };
 
+  const handleCopyTrainingConfig = () => {
+    const source = existingTraining?.config;
+
+    if (!source || sessionRef.current) {
+      return;
+    }
+
+    const copied = structuredClone(source);
+
+    setConfig(copied);
+
+    setSelectedAgentId(
+      copied.agents[0]?.id ?? ""
+    );
+
+    setWorkspaceMode("new");
+    setUseTrained(false);
+    setEditTool("inspect");
+
+    setNotice(
+      "The training configuration was copied to a new editable draft."
+    );
+  };
+
+  const handleWorkspaceModeChange = (
+    mode: WorkspaceMode
+  ) => {
+    if (sessionRef.current) {
+      setError(
+        "Delete the active session before changing configuration source."
+      );
+      return;
+    }
+
+    setPlaying(false);
+    setEffects([]);
+    setSelectedCell(null);
+
+    setWorkspaceMode(mode);
+
+    if (mode === "existing") {
+      setEditTool("inspect");
+    }
+
+    setError("");
+  };
+
+  const handleLoadExistingTraining = async () => {
+    const id = existingTrainingId.trim();
+
+    if (!id) {
+      setError("Enter a training ID.");
+      return;
+    }
+
+    if (loadingExistingTraining) return;
+
+    setLoadingExistingTraining(true);
+    setExistingTraining(null);
+
+    setError("");
+    setNotice("");
+
+    try {
+      const result = await api.training(id);
+
+      if (result.training_id !== id) {
+        throw new Error(
+          "The API returned a different training ID."
+        );
+      }
+
+      setExistingTraining(result);
+
+      if (isTrainingSuccessful(result.status)) {
+        setNotice(
+          "Training loaded successfully. You can create a trained session."
+        );
+      } else {
+        setNotice(
+          `Training found with status: ${result.status}.`
+        );
+      }
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : String(error)
+      );
+    } finally {
+      setLoadingExistingTraining(false);
+    }
+  };
+
   // ----------------------------------------------
   // Create session
   // ----------------------------------------------
 
   const handleCreateSession = async () => {
-    if (!config || !catalog || working || stepInFlight.current) {
+    if (
+      !config ||
+      !catalog ||
+      working ||
+      stepInFlight.current
+    ) {
       return;
     }
 
-    if (!useTrained && validationErrors.length) {
-      setError(validationErrors.join(" "));
-      return;
-    }
+    const usingExistingTraining =
+      workspaceMode === "existing";
 
-    if (useTrained && (!trainingReady || !training.created)) {
-      setError("The training is not yet available.");
-      return;
+    let trainingId: string | null = null;
+
+    let sourceConfig: SimulationConfig | null = null;
+
+    if (usingExistingTraining) {
+      if (!existingTrainingReady || !existingTraining) {
+        setError(
+          "Load a completed training before creating a session."
+        );
+        return;
+      }
+
+      trainingId = existingTraining.training_id;
+
+      sourceConfig = existingTraining.config ?? null;
+    } else if (useTrained) {
+      if (!trainingReady || !training.created) {
+        setError(
+          "The selected training is not ready."
+        );
+        return;
+      }
+
+      trainingId = training.created.training_id;
+
+      sourceConfig = trainingConfig;
+    } else {
+      if (validationErrors.length > 0) {
+        setError(validationErrors.join(" "));
+        return;
+      }
+
+      sourceConfig = config;
     }
 
     setPlaying(false);
     setBusyAction("create");
+
     setError("");
+    setNotice("");
 
     try {
-      const previousId = sessionRef.current?.session_id;
+      const previousId =
+        sessionRef.current?.session_id;
 
-      const sourceConfig =
-        useTrained && trainingConfig
-          ? trainingConfig
-          : config;
-
-      const response = useTrained
+      const response = trainingId
         ? await api.createSession(
             undefined,
-            training.created!.training_id
+            trainingId
           )
-        : await api.createSession(config);
+        : await api.createSession(
+            config
+          );
 
       sessionRef.current = response;
       setSession(response);
-      setStepHistory([]);
+
+      setSelectedAgentId(
+        response.state.actors[0]?.id ?? ""
+      );
+
       setEffects([]);
       setSelectedCell(null);
       setEditTool("inspect");
 
+      setStepHistory([]);
+
       setSessionWorldLimits({
-        maxHealth: sourceConfig.world.max_health,
-        maxSteps: sourceConfig.world.max_steps,
+        maxHealth:
+          sourceConfig?.world.max_health ??
+          Math.max(
+            1,
+            ...response.state.actors.map(
+              (actor) => actor.health
+            )
+          ),
+
+        maxSteps:
+          sourceConfig?.world.max_steps ?? null,
       });
 
-      setNotice(
-        useTrained
-          ? "Session created with the selected training."
-          : "Session created without training."
-      );
+      if (trainingId) {
+        setNotice(
+          `Trained session created using ${trainingId}.`
+        );
+      } else {
+        setNotice(
+          "Untrained session created successfully."
+        );
+      }
 
-      // We do not delete the previous one until the new one exists.
-      if (previousId && previousId !== response.session_id) {
+      if (
+        previousId &&
+        previousId !== response.session_id
+      ) {
         try {
           await api.deleteSession(previousId);
         } catch {
-          // The new session is still valid.
         }
       }
-    } catch (e) {
+    } catch (error) {
       setError(
-        e instanceof Error ? e.message : String(e)
+        error instanceof Error
+          ? error.message
+          : String(error)
       );
     } finally {
       setBusyAction(null);
@@ -647,231 +835,332 @@ export default function App() {
         </div>
       )}
 
-      {catalog && config && worldState && (
+      {catalog && config && (
         <main className="workspace">
           <aside className="workspace-left">
-            <ConfigPanel
-              config={config}
-              catalog={catalog}
-              onChange={setConfig}
-              selectedAgentId={selectedAgentId}
-              onSelectAgent={setSelectedAgentId}
-              editTool={editTool}
-              onEditTool={setEditTool}
-              sceneLocked={Boolean(session)}
-            />
+            {workspaceMode === "new" ? (
+              <ConfigPanel
+                config={config}
+                catalog={catalog}
+                onChange={setConfig}
+
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={setSelectedAgentId}
+
+                editTool={editTool}
+                onEditTool={setEditTool}
+
+                sceneLocked={Boolean(session)}
+              />
+            ) : (
+              <TrainingOverviewPanel
+                training={existingTraining}
+                state={session?.state ?? null}
+              />
+            )}
           </aside>
 
           <section className="workspace-center">
-            <div className="viewport-header">
-              <div>
-                <div className="eyebrow">
-                  LIVE ENVIRONMENT
-                </div>
+            {worldState ? (
+              <>
+                <div className="viewport-header">
+                  <div>
+                    <div className="eyebrow">
+                      LIVE ENVIRONMENT
+                    </div>
 
-                <h2>Simulation Field</h2>
-              </div>
+                    <h2>Simulation Field</h2>
+                  </div>
 
-              <div className="viewport-chips">
-                <span>
-                  <span className="small-dot teal" />
-                  {worldState.actors.length} agents
-                </span>
-
-                <span>
-                  {worldState.width} × {worldState.height}
-                </span>
-
-                <span>
-                  Step {worldState.step}
-                </span>
-              </div>
-            </div>
-
-            <div className="viewport">
-              <WorldScene
-                state={worldState}
-                maxHealth={
-                  session
-                    ? sessionWorldLimits.maxHealth
-                    : config.world.max_health
-                }
-                selectedCell={selectedCell}
-                onCellClick={handleCellClick}
-                effects={effects}
-
-                selectedAgentId={selectedAgentId}
-                onSelectAgent={(id) => {
-                  setSelectedAgentId(id);
-
-                  if (!session) {
-                    setEditTool("agent");
-                  }
-                }}
-              />
-
-              <div className="viewport-overlay top-left">
-                <span className="view-label">
-                  ISOMETRIC VIEW
-                </span>
-
-                <span className="view-subtitle">
-                  Drag to rotate · Scroll to zoom
-                </span>
-              </div>
-
-              <div className="viewport-overlay bottom-left">
-                <Crosshair size={15} />
-
-                <span>
-                  {selectedCell
-                    ? `Cell [${selectedCell.join(", ")}]`
-                    : "Select a cell"}
-                </span>
-              </div>
-
-              <div className="viewport-overlay bottom-right">
-                <span className="render-indicator" />
-                WEBGL ACTIVE
-              </div>
-            </div>
-
-            <div className="viewport-footer">
-              <div className="cell-info">
-                <div className="eyebrow">
-                  INSPECTOR
-                </div>
-
-                {selectedCell ? (
-                  <div className="selected-details">
-                    <strong>
-                      [{selectedCell[0]}, {selectedCell[1]}]
-                    </strong>
+                  <div className="viewport-chips">
+                    <span>
+                      <span className="small-dot teal" />
+                      {worldState.actors.length} agents
+                    </span>
 
                     <span>
-                      {selectedActor
-                        ? `${selectedActor.id} · ${selectedActor.team} · HP ${selectedActor.health}`
-                        : selectedIsObstacle
-                          ? "Obstacle"
-                          : selectedIsGoal
-                            ? "Goal"
-                            : "Free cell"}
+                      {worldState.width} x {worldState.height}
+                    </span>
+
+                    <span>
+                      Step {worldState.step}
                     </span>
                   </div>
-                ) : (
-                  <p className="muted">
-                    Select a cell to inspect it.
-                  </p>
-                )}
-              </div>
-
-              <div className="legend">
-                {[
-                  ...new Set(
-                    worldState.actors.map((a) => a.team)
-                  ),
-                ].map((team) => (
-                  <span key={team}>
-                    <i
-                      style={{
-                        background:
-                          (
-                            teamColor(team)
-                          ),
-                      }}
-                    />
-                    {team}
-                  </span>
-                ))}
-
-                <span>
-                  <i className="legend-goal" />
-                  Goal
-                </span>
-              </div>
-            </div>
-
-            <RewardsPanel
-              history={stepHistory}
-              actors={worldState.actors}
-              actionsCatalog={catalog.actions}
-              currentStep={worldState.step}
-              sessionActive={Boolean(session)}
-            />
-
-            {validationErrors.length > 0 && (
-              <div className="validation-panel">
-                <AlertCircle size={17} />
-
-                <div>
-                  <strong>
-                    Configuration pending correction
-                  </strong>
-
-                  {validationErrors.slice(0, 4).map((msg, i) => (
-                    <p key={i}>{msg}</p>
-                  ))}
-
-                  {validationErrors.length > 4 && (
-                    <p>
-                      And {validationErrors.length - 4} more errors.
-                    </p>
-                  )}
                 </div>
+
+                <div className="viewport">
+                  <WorldScene
+                    state={worldState}
+                    maxHealth={
+                      session
+                        ? sessionWorldLimits.maxHealth
+                        : config.world.max_health
+                    }
+                    selectedCell={selectedCell}
+                    onCellClick={handleCellClick}
+                    effects={effects}
+
+                    selectedAgentId={selectedAgentId}
+                    onSelectAgent={(id) => {
+                      setSelectedAgentId(id);
+
+                      if (!session) {
+                        setEditTool("agent");
+                      }
+                    }}
+                  />
+
+                  <div className="viewport-overlay top-left">
+                    <span className="view-label">
+                      ISOMETRIC VIEW
+                    </span>
+
+                    <span className="view-subtitle">
+                      Drag to rotate · Scroll to zoom
+                    </span>
+                  </div>
+
+                  <div className="viewport-overlay bottom-left">
+                    <Crosshair size={15} />
+
+                    <span>
+                      {selectedCell
+                        ? `Cell [${selectedCell.join(", ")}]`
+                        : "Select a cell"}
+                    </span>
+                  </div>
+
+                  <div className="viewport-overlay bottom-right">
+                    <span className="render-indicator" />
+                    WEBGL ACTIVE
+                  </div>
+                </div>
+
+                <div className="viewport-footer">
+                  <div className="cell-info">
+                    <div className="eyebrow">
+                      INSPECTOR
+                    </div>
+
+                    {selectedCell ? (
+                      <div className="selected-details">
+                        <strong>
+                          [{selectedCell[0]}, {selectedCell[1]}]
+                        </strong>
+
+                        <span>
+                          {selectedActor
+                            ? `${selectedActor.id} · ${selectedActor.team} · HP ${selectedActor.health}`
+                            : selectedIsObstacle
+                              ? "Obstacle"
+                              : selectedIsGoal
+                                ? "Goal"
+                                : "Free cell"}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="muted">
+                        Select a cell to inspect it.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="legend">
+                    {[
+                      ...new Set(
+                        worldState.actors.map((a) => a.team)
+                      ),
+                    ].map((team) => (
+                      <span key={team}>
+                        <i
+                          style={{
+                            background:
+                              (
+                                teamColor(team)
+                              ),
+                          }}
+                        />
+                        {team}
+                      </span>
+                    ))}
+
+                    <span>
+                      <i className="legend-goal" />
+                      Goal
+                    </span>
+                  </div>
+                </div>
+
+                <RewardsPanel
+                  history={stepHistory}
+                  actors={worldState.actors}
+                  actionsCatalog={catalog.actions}
+                  currentStep={worldState.step}
+                  sessionActive={Boolean(session)}
+                />
+
+                {workspaceMode === "new" &&
+                  validationErrors.length > 0 && (
+                  <div className="validation-panel">
+                    <AlertCircle size={17} />
+
+                    <div>
+                      <strong>
+                        Configuration pending correction
+                      </strong>
+
+                      {validationErrors.slice(0, 4).map((msg, i) => (
+                        <p key={i}>{msg}</p>
+                      ))}
+
+                      {validationErrors.length > 4 && (
+                        <p>
+                          And {validationErrors.length - 4} more errors.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="training-world-placeholder">
+                <Database size={38} />
+
+                <h2>World preview unavailable</h2>
+
+                <p>
+                  The training API does not expose the original
+                  simulation configuration.
+                </p>
+
+                <p>
+                  Load a completed training and create a session
+                  to retrieve its world, agents, and action space.
+                </p>
               </div>
             )}
           </section>
 
           <aside className="workspace-right">
-            <TrainingPanel
-              status={training.status}
-              episodes={training.episodes}
+            <ExistingTrainingPanel
+              mode={workspaceMode}
+              onModeChange={handleWorkspaceModeChange}
 
-              optimizations={training.optimizations}
-              optimizationStarted={training.optimizationStarted}
+              trainingId={existingTrainingId}
 
-              starting={training.starting}
-              streamConnected={training.streamConnected}
+              onTrainingIdChange={(value) => {
+                setExistingTrainingId(value);
+                setExistingTraining(null);
+              }}
 
-              onStart={(count) => void handleStartTraining(count)}
+              training={existingTraining}
+              loading={loadingExistingTraining}
+
+              sessionActive={Boolean(session)}
+
+              onLoad={() => {
+                void handleLoadExistingTraining();
+              }}
+
+              onCopyConfig={handleCopyTrainingConfig}
             />
+
+            {workspaceMode === "new" && (
+              <TrainingPanel
+                status={training.status}
+                episodes={training.episodes}
+
+                optimizations={training.optimizations}
+                optimizationStarted={training.optimizationStarted}
+
+                starting={training.starting}
+                streamConnected={training.streamConnected}
+
+                onStart={(count) => {
+                  void handleStartTraining(count);
+                }}
+              />
+            )}
 
             <SimulationPanel
               session={session}
+
               maxSteps={
                 session
                   ? sessionWorldLimits.maxSteps
-                  : config.world.max_steps
+                  : workspaceMode === "existing"
+                    ? existingTraining?.config?.world.max_steps ?? null
+                    : config.world.max_steps
               }
+
               busy={working || stepping}
               stepping={stepping}
               playing={playing}
+
               speed={speed}
               onSpeed={setSpeed}
-              useTrained={useTrained}
-              canUseTrained={trainingReady}
+
+              useTrained={
+                workspaceMode === "existing"
+                  ? true
+                  : useTrained
+              }
+
+              canUseTrained={
+                workspaceMode === "existing"
+                  ? existingTrainingReady
+                  : trainingReady
+              }
+
+              fixedTrainingId={
+                workspaceMode === "existing"
+                  ? existingTraining?.training_id ?? null
+                  : undefined
+              }
+
+              canCreateSession={
+                workspaceMode === "existing"
+                  ? existingTrainingReady
+                  : true
+              }
+
               onUseTrained={setUseTrained}
-              onCreate={() => void handleCreateSession()}
-              onStep={() => void performStep()}
-              onTogglePlay={() => setPlaying((v) => !v)}
-              onReset={() => void handleReset()}
-              onDelete={() => void handleDelete()}
+
+              onCreate={() => {
+                void handleCreateSession();
+              }}
+
+              onStep={() => {
+                void performStep();
+              }}
+
+              onTogglePlay={() => {
+                setPlaying((value) => !value);
+              }}
+
+              onReset={() => {
+                void handleReset();
+              }}
+
+              onDelete={() => {
+                void handleDelete();
+              }}
             />
 
-            {trainingReady && (
+            {workspaceMode === "new" && trainingReady && (
               <div className="notice">
                 <strong>Trained model available</strong>
+
                 <p>
-                  You can create a session using its
-                  training_id. The original configuration
-                  from that training will be reused.
+                  You can create a session using the completed
+                  training from this application.
                 </p>
 
                 {activeConfigChanged && (
                   <p>
-                    You have modified the draft after the
-                    training. Those changes will not be applied
-                    to a session created with this training_id.
+                    The draft configuration has changed since
+                    training started. The trained session will
+                    use the original training configuration.
                   </p>
                 )}
               </div>

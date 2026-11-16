@@ -192,6 +192,8 @@ export interface TrainingStatus {
 
   last_episode?: number;
   error?: string | null;
+
+  config?: SimulationConfig | null;
 }
 
 export interface EpisodeEvent {

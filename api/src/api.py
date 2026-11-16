@@ -4,6 +4,7 @@ import threading
 from dataclasses import dataclass
 import traceback
 from uuid import uuid4
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
@@ -14,7 +15,8 @@ from src.sim.config import SimulationConfig
 from src.sim.jobs import (
     TrainingManager,
     load_trained_runner,
-    safe_training_path,
+    read_training_manifest,
+    config_from_training_manifest,
 )
 
 from src.sim.policies.registry import POLICY_REGISTRY
@@ -62,6 +64,16 @@ class StepRequest(BaseModel):
 class ResetRequest(BaseModel):
     seed: int | None = None
 
+class TrainingStatusResponse(BaseModel):
+    training_id: str
+    status: str
+    episodes: int
+    completed_episodes: int
+
+    last_episode: dict[str, Any] | None = None
+    error: str | None = None
+
+    config: SimulationConfig | None = None
 
 @dataclass
 class Session:
@@ -113,35 +125,94 @@ def create_training(request: TrainingRequest):
     }
 
 
-@app.get("/trainings/{training_id}")
-def get_training(training_id: str):
+@app.get(
+    "/trainings/{training_id}",
+    response_model=TrainingStatusResponse,
+)
+def get_training(
+    training_id: str,
+) -> TrainingStatusResponse:
+
     job = training_manager.get(training_id)
 
-    if job is not None:
-        return job.snapshot()
-
-    # Allows retrieving completed trainings
-    # after the server has been restarted.
-    try:
-        folder = safe_training_path(training_id)
-    except ValueError:
-        raise HTTPException(404, "Training not found")
-
-    manifest_path = folder / "manifest.json"
-
-    if not manifest_path.is_file():
-        raise HTTPException(404, "Training not found")
-
-    manifest = json.loads(
-        manifest_path.read_text(encoding="utf-8")
+    snapshot = (
+        job.snapshot()
+        if job is not None
+        else None
     )
 
-    return {
-        "training_id": training_id,
-        "status": "completed",
-        "episodes": manifest["episodes"],
-        "completed_episodes": manifest["episodes"],
-    }
+    if (
+        snapshot is not None
+        and snapshot["status"] != "completed"
+    ):
+        return TrainingStatusResponse(
+            **snapshot,
+            config=None,
+        )
+
+    try:
+        manifest = read_training_manifest(
+            training_id
+        )
+
+    except FileNotFoundError as exc:
+        if snapshot is None:
+            raise HTTPException(
+                404, "Training not found"
+            ) from exc
+
+        raise HTTPException(
+            500,
+            "Completed training manifest is missing",
+        ) from exc
+
+    except ValueError as exc:
+        raise HTTPException(
+            409,
+            "Stored training manifest is invalid",
+        ) from exc
+
+    except OSError as exc:
+        raise HTTPException(
+            500,
+            "Unable to read training manifest",
+        ) from exc
+
+    try:
+        config = config_from_training_manifest(
+            manifest
+        )
+
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            409,
+            f"Saved training configuration is incompatible: {exc}",
+        ) from exc
+
+    if snapshot is not None:
+        return TrainingStatusResponse(
+            **snapshot,
+            config=config,
+        )
+
+    try:
+        episodes = int(
+            manifest["episodes"]
+        )
+
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            409,
+            "Saved training manifest has invalid episodes",
+        ) from exc
+
+    return TrainingStatusResponse(
+        training_id=training_id,
+        status="completed",
+        episodes=episodes,
+        completed_episodes=episodes,
+        config=config,
+    )
 
 
 @app.get("/trainings/{training_id}/events")

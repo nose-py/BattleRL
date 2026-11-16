@@ -4,6 +4,7 @@ from multiprocessing.context import SpawnProcess
 import os
 import queue
 import threading
+from copy import deepcopy
 from collections import deque
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -24,6 +25,80 @@ def safe_training_path(training_id: str) -> Path:
 
     return DATA_ROOT / normalized
 
+# Default values used by older AgentSpec versions.
+_LEGACY_Q_DEFAULTS = {
+    "alpha": 0.15,
+    "gamma": 0.95,
+    "epsilon": 1.0,
+    "epsilon_min": 0.05,
+    "epsilon_decay": 0.995,
+}
+
+def read_training_manifest(training_id: str) -> dict:
+    path = safe_training_path(training_id) / "manifest.json"
+
+    if not path.is_file():
+        raise FileNotFoundError(
+            "Training manifest not found"
+        )
+
+    try:
+        data = json.loads(
+            path.read_text(encoding="utf-8")
+        )
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "Invalid training manifest JSON"
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            "Training manifest must be a JSON object"
+        )
+
+    return data
+
+
+def config_from_training_manifest(
+    manifest: dict,
+) -> SimulationConfig:
+    saved = manifest.get("config")
+
+    if not isinstance(saved, dict):
+        raise ValueError(
+            "Training manifest has no configuration"
+        )
+
+    data = deepcopy(saved)
+
+    for agent in data.get("agents", []):
+        if not isinstance(agent, dict):
+            continue
+
+        legacy = {
+            name: agent.pop(name)
+            for name in _LEGACY_Q_DEFAULTS
+            if name in agent
+        }
+
+        if legacy and agent.get("policy") in (
+            "q_learning",
+            "double_q",
+        ):
+            params = agent.setdefault("params", {})
+
+            if not isinstance(params, dict):
+                raise ValueError(
+                    "Agent params must be a JSON object"
+                )
+
+            for name, default in _LEGACY_Q_DEFAULTS.items():
+                params.setdefault(
+                    name,
+                    legacy.get(name, default),
+                )
+
+    return SimulationConfig.model_validate(data)
 
 def train_worker(
     config_data: dict,
@@ -278,20 +353,8 @@ def load_trained_runner(training_id: str):
     except ValueError:
         raise FileNotFoundError("Invalid training ID")
 
-    manifest_path = folder / "manifest.json"
-
-    if not manifest_path.is_file():
-        raise FileNotFoundError(
-            "Training not found or incomplete"
-        )
-
-    manifest = json.loads(
-        manifest_path.read_text(encoding="utf-8")
-    )
-
-    config = SimulationConfig.model_validate(
-        manifest["config"]
-    )
+    manifest = read_training_manifest(training_id)
+    config = config_from_training_manifest(manifest)
 
     runner = SimulationRunner(config)
 
