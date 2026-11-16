@@ -2038,3 +2038,217 @@ h3 svg {
 .optimization-done {
   background: #55e3c1;
 }
+
+/* ==========================================
+   EXISTING TRAINING
+========================================== */
+
+.training-source-switch {
+  width: 100%;
+  display: flex;
+}
+
+.training-source-switch button {
+  flex: 1;
+}
+
+.existing-training-content {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+
+  margin-top: 17px;
+}
+
+.existing-training-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.existing-training-form input {
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+
+  font-size: 11px;
+}
+
+.loaded-training {
+  padding: 13px;
+
+  background: #172d3d;
+  border: 1px solid #32625e;
+  border-radius: 9px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.loaded-training-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.loaded-training-header strong {
+  display: block;
+  font-size: 12px;
+}
+
+.loaded-training-header small {
+  display: block;
+  margin-top: 4px;
+
+  color: #8ca6b8;
+  font-size: 10px;
+}
+
+.loaded-training-id {
+  padding: 10px;
+
+  background: #0e2030;
+  border: 1px solid #304b60;
+  border-radius: 6px;
+
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+
+  font-size: 10px;
+  color: #8de5cf;
+
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.loaded-training .stat-line {
+  margin: 2px 0;
+}
+
+.loaded-training .subtle-button.full {
+  width: 100%;
+}
+
+/* ==========================================
+   TRAINING OVERVIEW
+========================================== */
+
+.training-overview-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  padding: 12px;
+
+  background: #192d40;
+  border: 1px solid #304b60;
+  border-radius: 9px;
+}
+
+.training-overview-item > strong {
+  font-size: 12px;
+  color: #e2edf5;
+}
+
+.training-overview-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.training-overview-title strong {
+  font-size: 12px;
+}
+
+.training-parameters {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+
+  padding-top: 7px;
+  border-top: 1px solid #30475a;
+}
+
+.training-parameters .stat-line {
+  margin: 5px 0;
+}
+
+.training-parameters .stat-line strong {
+  max-width: 50%;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.training-world-placeholder {
+  flex: 1;
+
+  min-height: 400px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+
+  padding: 35px;
+
+  color: #72ddc0;
+  text-align: center;
+}
+
+.training-world-placeholder h2 {
+  color: #e7eff8;
+  font-size: 20px;
+}
+
+.training-world-placeholder p {
+  max-width: 390px;
+
+  margin: 0;
+
+  color: #90a6bb;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.fixed-training-info {
+  padding: 12px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+
+  background: #173a38;
+  border: 1px solid #367369;
+  border-radius: 9px;
+}
+
+.fixed-training-info strong {
+  color: #a8f3da;
+  font-size: 12px;
+}
+
+.fixed-training-info > span {
+  color: #e3f4ee;
+
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.fixed-training-info small {
+  color: #8cbaad;
+  font-size: 10px;
+  line-height: 1.5;
+}

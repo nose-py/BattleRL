@@ -46,11 +46,14 @@ function describeEvent(event: {
 interface SimulationPanelProps {
   session: SessionResponse | null;
 
-  maxSteps: number;
+  maxSteps: number | null;
 
   busy: boolean;
   stepping: boolean;
   playing: boolean;
+
+  fixedTrainingId?: string | null;
+  canCreateSession?: boolean;
 
   speed: number;
   onSpeed: (value: number) => void;
@@ -72,6 +75,8 @@ export default function SimulationPanel({
   busy,
   stepping,
   playing,
+  fixedTrainingId,
+  canCreateSession = true,
   speed,
   onSpeed,
   useTrained,
@@ -108,31 +113,55 @@ export default function SimulationPanel({
         </span>
       </div>
 
-      <label className="check-row">
-        <input
-          type="checkbox"
-          checked={useTrained}
-          disabled={!canUseTrained || busy}
-          onChange={(e) => onUseTrained(e.target.checked)}
-        />
+      {fixedTrainingId !== undefined ? (
+        <div className="fixed-training-info">
+          <strong>Existing training</strong>
 
-        <span>
-          Use completed training
-          {!canUseTrained && (
-            <small>
-              Train first to enable this option.
-            </small>
-          )}
-        </span>
-      </label>
+          <span>
+            {fixedTrainingId ??
+              "No training selected"}
+          </span>
+
+          <small>
+            Sessions will use the trained policies
+            associated with this ID.
+          </small>
+        </div>
+      ) : (
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={useTrained}
+            disabled={!canUseTrained || busy}
+            onChange={(event) => {
+              onUseTrained(event.target.checked);
+            }}
+          />
+
+          <span>
+            Use completed training
+
+            {!canUseTrained && (
+              <small>
+                Complete a training first to enable this option.
+              </small>
+            )}
+          </span>
+        </label>
+      )}
 
       <button
         className="primary-button full"
-        disabled={busy}
+        disabled={busy || !canCreateSession}
         onClick={onCreate}
       >
         <Plus size={16} />
-        {session ? "Create another session" : "Create session"}
+
+        {session
+          ? "Create another session"
+          : fixedTrainingId !== undefined
+            ? "Create trained session"
+            : "Create session"}
       </button>
 
       {state && (
@@ -156,7 +185,11 @@ export default function SimulationPanel({
 
           <div className="stat-line">
             <span>Configured limit</span>
-            <strong>{maxSteps} steps</strong>
+            <strong>
+              {maxSteps === null
+                ? "Not available"
+                : `${maxSteps} steps`}
+            </strong>
           </div>
 
           <div className="playback-controls">
